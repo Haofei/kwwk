@@ -18,7 +18,12 @@ public final class CodingLayout: @unchecked Sendable {
     /// `maxLines` is set to `terminalHeight - reservedRows` each render cycle.
     public let reservedRows: Int
 
-    public init() {
+    /// How many rows the status block occupies. Defaults to 1; pass 2 when
+    /// rendering a two-row status (state line + keyboard hints) so the
+    /// transcript viewport leaves room for both.
+    public let statusRows: Int
+
+    public init(statusRows: Int = 1) {
         self.header = TextComponent([])
         self.transcript = TextComponent([])
         self.divider = HorizontalRule("─")
@@ -26,13 +31,15 @@ public final class CodingLayout: @unchecked Sendable {
         self.input = InputComponent()
         self.promptRow = PromptRow(prompt: Style.prompt("❯ "), input: input)
 
+        self.statusRows = statusRows
+
         //   header:     3
         //   blank:      1
         //   divider:    1
-        //   status:     1
+        //   status:     statusRows
         //   blank:      1
         //   prompt:     1
-        self.reservedRows = 3 + 1 + 1 + 1 + 1 + 1
+        self.reservedRows = 3 + 1 + 1 + statusRows + 1 + 1
     }
 
     /// Install layout components into `tui` in display order. Call once at

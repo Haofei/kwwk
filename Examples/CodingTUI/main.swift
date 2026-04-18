@@ -91,7 +91,7 @@ struct CodingTUI {
         // behavior). Pass `useAlternateScreen: true` if you want a blank
         // fullscreen buffer instead.
         let runner = TUIRunner(useAlternateScreen: false, hideCursor: false)
-        let layout = CodingLayout()
+        let layout = CodingLayout(statusRows: 2)
         let renderer = TranscriptRenderer()
 
         layout.header.lines = [
@@ -99,7 +99,6 @@ struct CodingTUI {
             Style.dimmed("  \(modelId)"),
             Style.dimmed("  \(shorten(cwd, to: max(20, runner.terminal.width - 4)))"),
         ]
-        layout.status.lines = [Style.dimmed("ready · Ctrl-C to abort · Esc to exit")]
         layout.install(into: runner.tui)
         layout.fitViewport(height: runner.terminal.height)
         runner.focus(layout.promptRow)
@@ -110,20 +109,33 @@ struct CodingTUI {
             }
         }
 
+        // Shared status bar model. The status line has two rows:
+        //   row 1: dynamic state (streaming / aborting / bg-running / ready)
+        //   row 2: static keyboard hints
+        let statusBar = CodingStatusBar(
+            layout: layout,
+            runner: runner,
+            agent: agent,
+            bgManager: bgManager,
+            sessionId: sessionId
+        )
+        await statusBar.render()
+
         _ = agent.subscribe { event, _ in
             await MainActor.run {
                 renderer.apply(event)
                 layout.setTranscript(renderer.lines.all)
                 switch event {
                 case .agentStart:
-                    layout.status.lines = [Style.running("● streaming… Ctrl-C to abort")]
+                    statusBar.setMode(.streaming)
                 case .agentEnd:
-                    layout.status.lines = [Style.dimmed("ready · Ctrl-C to abort · Esc to exit")]
+                    statusBar.setMode(.idle)
                 default: break
                 }
                 layout.fitViewport(height: runner.terminal.height)
                 runner.tui.requestRender()
             }
+            await statusBar.render()
         }
 
         runner.bind(.init("enter")) { _ in
@@ -136,61 +148,175 @@ struct CodingTUI {
                     try await agent.prompt(text)
                 } catch {
                     await MainActor.run {
-                        layout.status.lines = [Style.error("error: \(error)")]
+                        layout.status.lines = [
+                            Style.error("error: \(error)"),
+                            Style.dimmed("  Esc: cancel / stop bg tasks · Ctrl-C: quit"),
+                        ]
                         runner.tui.requestRender()
                     }
                 }
             }
         }
-        // Claude-Code-style Ctrl-C: first press aborts the running turn,
-        // a second press (while still aborting / idle) force-quits.
-        let abortPending = AbortFlag()
+
+        // Ctrl-C: always exits (single tap). Keep it as the hard-stop key so
+        // there's always a predictable way out.
         runner.bind(.ctrl("c")) { _ in
-            if !agent.state.isStreaming {
-                runner.exit()
-                return
-            }
-            if abortPending.isSet {
-                runner.exit()
-                return
-            }
-            abortPending.set()
-            agent.abort()
             Task { @MainActor in
-                layout.status.lines = [
-                    Style.running("● aborting… press Ctrl-C again to force quit")
-                ]
-                runner.tui.requestRender()
+                await agent.abortAndKillBackgroundTasks()
+                runner.exit()
             }
         }
-        _ = agent.subscribe { event, _ in
-            if case .agentEnd = event {
-                await MainActor.run { abortPending.clear() }
+
+        // Esc: the primary "stop" key.
+        //   1. While the agent is streaming → abort the current generation.
+        //   2. While idle AND background tasks are running → kill them all.
+        //   3. Otherwise → exit the app.
+        runner.bind(.init("escape")) { _ in
+            if agent.state.isStreaming {
+                agent.abort()
+                Task { @MainActor in
+                    statusBar.setMode(.aborting)
+                    await statusBar.render()
+                }
+                return
+            }
+            Task { @MainActor in
+                let running = await bgManager.list(sessionId: sessionId)
+                    .filter { $0.status == .running }.count
+                if running > 0 {
+                    await bgManager.killAll(sessionId: sessionId)
+                    statusBar.flashKilled(count: running)
+                    await statusBar.render()
+                } else {
+                    runner.exit()
+                }
             }
         }
-        runner.bind(.init("escape")) { _ in runner.exit() }
+
+        // Periodic refresh so the background-task count stays live even when
+        // there aren't any agent events firing. 500ms is invisibly slow for
+        // a human but cheap (just an actor dict count).
+        let pollTask = Task.detached {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                await statusBar.render()
+            }
+        }
+        defer { pollTask.cancel() }
 
         try await runner.run()
 
         // Shutdown cleanup: kill any still-running background tasks and
         // tear down the isolated tmux socket so we don't leak processes
         // after the user exits.
+        pollTask.cancel()
         await agent.abortAndKillBackgroundTasks()
         await TmuxSessionManager.shared.teardown()
     }
 }
+
+// MARK: - Status bar
+
+/// Two-line status bar with dynamic state + static keyboard hints.
+///
+///   row 1: ● generating… · Esc to cancel
+///          ○ 3 background tasks running · Esc to stop them
+///          ready
+///          killed 2 background tasks (flashes briefly)
+///   row 2: Esc: cancel generation / stop bg tasks · Ctrl-C: quit
+///
+/// The bar is re-rendered on agent events AND on a poll timer (so background
+/// task counts stay live even when the agent is idle).
+@MainActor
+final class CodingStatusBar {
+    enum Mode { case idle, streaming, aborting, flashing }
+
+    private let layout: CodingLayout
+    private let runner: TUIRunner
+    private let agent: Agent
+    private let bgManager: BackgroundTaskManager
+    private let sessionId: String
+    private var mode: Mode = .idle
+    private var flashText: String?
+    private var lastRenderedLines: [String] = []
+
+    init(
+        layout: CodingLayout,
+        runner: TUIRunner,
+        agent: Agent,
+        bgManager: BackgroundTaskManager,
+        sessionId: String
+    ) {
+        self.layout = layout
+        self.runner = runner
+        self.agent = agent
+        self.bgManager = bgManager
+        self.sessionId = sessionId
+    }
+
+    func setMode(_ mode: Mode) { self.mode = mode }
+
+    func flashKilled(count: Int) {
+        let noun = count == 1 ? "task" : "tasks"
+        flashText = "killed \(count) background \(noun)"
+        mode = .flashing
+        // Auto-clear the flash after ~1s.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self else { return }
+            await MainActor.run {
+                self.flashText = nil
+                if self.mode == .flashing { self.mode = .idle }
+            }
+            await self.render()
+        }
+    }
+
+    /// Recompute the two status lines and re-render.
+    func render() async {
+        let running = await bgManager.list(sessionId: sessionId)
+            .filter { $0.status == .running }.count
+        let isStreaming = agent.state.isStreaming
+
+        let line1: String
+        if let flash = flashText {
+            line1 = Style.dimmed(flash)
+        } else if mode == .aborting {
+            // Aborting takes precedence over streaming: after `agent.abort()`
+            // fires, `isStreaming` stays true for a beat until agentEnd
+            // lands, but we want the user to see "aborting…" immediately.
+            line1 = Style.running("● aborting…") + " " +
+                Style.dimmed("· Ctrl-C to force quit")
+        } else if isStreaming {
+            var parts = [Style.running("● generating…")]
+            parts.append(Style.dimmed("· Esc to cancel"))
+            if running > 0 {
+                parts.append(Style.dimmed("· \(running) bg \(running == 1 ? "task" : "tasks") running"))
+            }
+            line1 = parts.joined(separator: " ")
+        } else if running > 0 {
+            let noun = running == 1 ? "task" : "tasks"
+            line1 = Style.dimmed("○ \(running) background \(noun) running") + " " +
+                Style.dimmed("· Esc to stop them")
+        } else {
+            line1 = Style.dimmed("ready")
+        }
+
+        let line2 = Style.dimmed("  Esc: cancel generation / stop bg tasks · Ctrl-C: quit")
+        let newLines = [line1, line2]
+        if newLines != lastRenderedLines {
+            lastRenderedLines = newLines
+            layout.status.lines = newLines
+            runner.tui.requestRender()
+        }
+    }
+}
+
+// MARK: - Helpers
 
 private func shorten(_ path: String, to maxLen: Int) -> String {
     if path.count <= maxLen { return path }
     let head = path.prefix(maxLen / 2 - 1)
     let tail = path.suffix(maxLen / 2 - 2)
     return "\(head)…\(tail)"
-}
-
-final class AbortFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _value = false
-    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return _value }
-    func set() { lock.lock(); _value = true; lock.unlock() }
-    func clear() { lock.lock(); _value = false; lock.unlock() }
 }
