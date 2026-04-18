@@ -17,9 +17,15 @@ public enum KWWK {
     /// `tools` controls which coding tools the agent is given. Default is
     /// `.all` (read/write/edit/bash/grep/find/ls/bg_status + optional tmux).
     /// Pass `.readOnly` for a sandboxed reviewer-style agent.
+    ///
+    /// `autoCompactThreshold` fires a silent `/compact` (summarize the
+    /// transcript → replace with a recap) once the turn's reported
+    /// `usage.input + usage.output` crosses that ratio of the model's
+    /// `contextWindow`. Pass `nil` to disable.
     public static func runCodingTUI(
         cwd: String? = nil,
-        tools: CodingTools = .all
+        tools: CodingTools = .all,
+        autoCompactThreshold: Double? = 0.75
     ) async throws {
         let resolved = try await resolveAgentAuth()
         let workDir = cwd ?? FileManager.default.currentDirectoryPath
@@ -28,7 +34,8 @@ public enum KWWK {
             modelLabel: resolved.modelLabel,
             cwd: workDir,
             tools: tools,
-            apiKeyResolver: resolved.apiKeyResolver
+            apiKeyResolver: resolved.apiKeyResolver,
+            autoCompactThreshold: autoCompactThreshold
         )
     }
 

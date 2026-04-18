@@ -117,186 +117,33 @@ func adoptFields(from current: Model, into picked: Model) -> Model {
 
 // MARK: - /compact
 
-/// Minimum message count worth compacting. Below this the user probably
-/// hasn't said enough for a summary to help; we short-circuit so the LLM
-/// doesn't get a pointless request.
-private let compactMinMessages = 4
-
-/// `/compact` — fire a one-shot LLM summarize call with the current
-/// transcript, then replace `agent.state.messages` with a single
-/// user-role "previous-session-summary" message. The system prompt and
-/// tool registrations stay intact so the next turn behaves normally;
-/// only the transcript is compressed.
-///
-/// Blocking rules:
-///   - If the agent is currently streaming, refuse (user should Esc first).
-///   - If there are fewer than `compactMinMessages`, say so and bail.
+/// `/compact` — thin wrapper around `performCompact` (see CompactRunner.swift)
+/// that surfaces each outcome as a dimmed transcript notification. The
+/// auto-compact driver calls the same `performCompact` so the two
+/// entry points produce bit-identical recap messages.
 @MainActor
 private func handleCompactCommand(_ ctx: SlashContext, _ args: String) async {
-    let agent = ctx.agent
-    if agent.state.isStreaming {
-        ctx.notify(Style.error("  /compact: agent is busy; stop it first (Esc)"))
-        return
-    }
-    let snapshot = agent.state.messages
-    if snapshot.count < compactMinMessages {
-        ctx.notify(Style.dimmed("  /compact: only \(snapshot.count) message(s); nothing to compact"))
-        return
+    let snapshot = ctx.agent.state.messages
+    if !ctx.agent.state.isStreaming && snapshot.count >= compactMinMessages {
+        ctx.notify(Style.dimmed("  /compact: summarizing \(snapshot.count) messages…"))
     }
 
-    ctx.notify(Style.dimmed("  /compact: summarizing \(snapshot.count) messages…"))
-
-    // Capture running background tasks BEFORE summarizing, so even if
-    // one finishes during the LLM call we still carry the state the
-    // current turn was acting against. `runningTasksSummary` returns
-    // "" when nothing is running, and we trim before deciding whether
-    // to append the section.
-    let runningTasks = await ctx.backgroundManager
-        .runningTasksSummary(sessionId: ctx.sessionId)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    do {
-        let summary = try await summarizeTranscript(
-            messages: snapshot,
-            model: agent.state.model,
-            apiKeyResolver: agent.apiKeyResolver
-        )
-        var body = """
-        <previous-session-summary>
-        \(summary)
-        </previous-session-summary>
-        """
-        if !runningTasks.isEmpty {
-            // Inject the running-task ledger so the next turn still
-            // knows the task ids + output file paths that the recap
-            // summarizer may have elided. Completion notifications
-            // will later arrive as separate user messages, so this
-            // only covers the "still running at compact time" gap.
-            body += "\n\n<running-background-tasks>\n\(runningTasks)\n</running-background-tasks>"
-        }
-        let recap = Message.user(UserMessage(content: [.text(TextContent(text: body))]))
-        agent.state.messages = [recap]
-        var note = "  /compact: compacted \(snapshot.count) messages → 1 recap"
-        if !runningTasks.isEmpty {
-            note += " (+ running-task ledger)"
-        }
-        ctx.notify(Style.prompt(note))
-    } catch {
-        let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
-        ctx.notify(Style.error("  /compact: \(msg)"))
-    }
-}
-
-/// Render a chat history into a plain-text transcript for the summarizer.
-/// Tool output is aggressively capped so a single verbose `ls -R` or build
-/// log doesn't drown out everything useful in the summary.
-private func renderForSummary(_ messages: [Message]) -> String {
-    let toolOutputCap = 500
-    return messages.compactMap { msg -> String? in
-        switch msg {
-        case .user(let u):
-            let text = u.content.compactMap { block -> String? in
-                if case .text(let t) = block { return t.text }
-                return nil
-            }.joined(separator: "\n")
-            return text.isEmpty ? nil : "User:\n\(text)"
-        case .assistant(let a):
-            var parts: [String] = []
-            for block in a.content {
-                switch block {
-                case .text(let t):
-                    if !t.text.isEmpty { parts.append(t.text) }
-                case .toolCall(let tc):
-                    parts.append("<tool-call name=\"\(tc.name)\" />")
-                case .thinking:
-                    continue  // omit — summarizer doesn't need to re-reason
-                }
-            }
-            return parts.isEmpty ? nil : "Assistant:\n\(parts.joined(separator: "\n"))"
-        case .toolResult(let tr):
-            let text = tr.content.compactMap { block -> String? in
-                if case .text(let t) = block { return t.text }
-                return nil
-            }.joined(separator: "\n")
-            let capped = text.count > toolOutputCap
-                ? String(text.prefix(toolOutputCap)) + "… [\(text.count - toolOutputCap) chars elided]"
-                : text
-            return "Tool(\(tr.toolName)):\n\(capped)"
-        }
-    }.joined(separator: "\n\n")
-}
-
-private enum CompactError: Error, LocalizedError {
-    case summarizationFailed(String)
-    case emptySummary
-
-    var errorDescription: String? {
-        switch self {
-        case .summarizationFailed(let reason): return "summarization failed: \(reason)"
-        case .emptySummary: return "LLM returned an empty summary"
-        }
-    }
-}
-
-/// Fire a one-shot LLM call (no tools, isolated system prompt) to produce
-/// a compressed recap of the conversation. The call uses the same model +
-/// api-key resolver as the agent, so Codex / Anthropic / etc. all work
-/// transparently.
-private func summarizeTranscript(
-    messages: [Message],
-    model: Model,
-    apiKeyResolver: (@Sendable (String) async -> String?)?
-) async throws -> String {
-    let transcript = renderForSummary(messages)
-
-    let systemPrompt = """
-    You are summarizing a coding-agent conversation so it can be resumed \
-    with a compressed context. Produce a concise recap that preserves:
-      • the user's goal and any decisions already agreed on
-      • concrete file paths touched and function / module names referenced
-      • in-flight work (partial commits, failing tests, open questions)
-      • outstanding asks the user made that aren't answered yet
-
-    Omit:
-      • pleasantries and rhetorical framing
-      • verbose tool output unless a specific line of it is load-bearing
-      • step-by-step reasoning (just the conclusions)
-
-    Write for a future agent resuming the session, not the user. Bullet \
-    points are fine. Target under 400 words.
-    """
-
-    let userPrompt = """
-    Conversation to summarize:
-
-    \(transcript)
-    """
-
-    let context = Context(
-        systemPrompt: systemPrompt,
-        messages: [.user(UserMessage(content: [.text(TextContent(text: userPrompt))]))],
-        tools: []
+    let outcome = await performCompact(
+        agent: ctx.agent,
+        backgroundManager: ctx.backgroundManager,
+        sessionId: ctx.sessionId
     )
 
-    var apiKey: String?
-    if let resolver = apiKeyResolver {
-        apiKey = await resolver(model.provider)
+    switch outcome {
+    case .refusedAgentBusy:
+        ctx.notify(Style.error("  /compact: agent is busy; stop it first (Esc)"))
+    case .refusedTooFewMessages(let count):
+        ctx.notify(Style.dimmed("  /compact: only \(count) message(s); nothing to compact"))
+    case .compacted(let n, let hasLedger):
+        var note = "  /compact: compacted \(n) messages → 1 recap"
+        if hasLedger { note += " (+ running-task ledger)" }
+        ctx.notify(Style.prompt(note))
+    case .failed(let msg):
+        ctx.notify(Style.error("  /compact: \(msg)"))
     }
-    let options = StreamOptions(apiKey: apiKey)
-
-    let response = try await stream(model: model, context: context, options: options)
-    let result = await response.result()
-
-    if result.stopReason == .error {
-        throw CompactError.summarizationFailed(result.errorMessage ?? "unknown")
-    }
-    let texts = result.content.compactMap { block -> String? in
-        if case .text(let t) = block { return t.text }
-        return nil
-    }
-    let summary = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    if summary.isEmpty {
-        throw CompactError.emptySummary
-    }
-    return summary
 }

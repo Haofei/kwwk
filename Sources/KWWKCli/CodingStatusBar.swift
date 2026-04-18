@@ -14,7 +14,7 @@ import KWWKAgent
 /// task counts stay live even when the agent is idle).
 @MainActor
 final class CodingStatusBar {
-    enum Mode { case idle, streaming, aborting, flashing }
+    enum Mode { case idle, streaming, aborting, flashing, compacting }
 
     private let layout: CodingLayout
     private let runner: TUIRunner
@@ -23,6 +23,9 @@ final class CodingStatusBar {
     private let sessionId: String
     private var mode: Mode = .idle
     private var flashText: String?
+    /// Count of messages the auto-compact driver is rolling up. Displayed
+    /// in the status line while `mode == .compacting`.
+    private var compactingMessageCount: Int = 0
     private var lastRenderedLines: [String] = []
 
     init(
@@ -40,6 +43,14 @@ final class CodingStatusBar {
     }
 
     func setMode(_ mode: Mode) { self.mode = mode }
+
+    /// Enter/leave the auto-compact "busy" state. `count` is the number
+    /// of messages being rolled up; surfaced in the status line so the
+    /// user sees what caused the pause.
+    func setCompacting(messageCount: Int) {
+        mode = .compacting
+        compactingMessageCount = messageCount
+    }
 
     func flashKilled(count: Int) {
         let noun = count == 1 ? "task" : "tasks"
@@ -69,7 +80,13 @@ final class CodingStatusBar {
         // chrome. The row is still reserved by the layout so everything
         // below it (prompt, divider) doesn't jitter.
         let line: String
-        if let flash = flashText {
+        if mode == .compacting {
+            // Takes precedence over every other state: while compacting,
+            // the agent itself is idle but we don't want the user to
+            // type a prompt that would race the message replacement.
+            line = Style.running("◐ auto-compacting \(compactingMessageCount) messages…") + " " +
+                Style.dimmed("· new prompts will queue")
+        } else if let flash = flashText {
             line = Style.dimmed(flash)
         } else if mode == .aborting {
             // Aborting takes precedence over streaming: after `agent.abort()`

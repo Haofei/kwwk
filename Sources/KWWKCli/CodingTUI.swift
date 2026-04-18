@@ -12,7 +12,8 @@ func runCodingTUIInternal(
     modelLabel: String,
     cwd: String,
     tools: CodingTools,
-    apiKeyResolver: (@Sendable (String) async -> String?)? = nil
+    apiKeyResolver: (@Sendable (String) async -> String?)? = nil,
+    autoCompactThreshold: Double? = 0.75
 ) async throws {
     // --- agent + background manager -------------------------------------
     let bgManager = BackgroundTaskManager()
@@ -38,15 +39,23 @@ func runCodingTUIInternal(
     let runner = TUIRunner(useAlternateScreen: false, hideCursor: false)
     let layout = CodingLayout(statusRows: 1)
     let renderer = TranscriptRenderer()
-    let headerModelLine = TextComponent([""])
-    layout.header.lines = [
-        Style.header("✻ kwwk coding agent"),
-        Style.dimmed("  \(modelLabel)"),
-        Style.dimmed("  \(shortenPath(cwd, to: max(20, runner.terminal.width - 4)))"),
-    ]
-    // `headerModelLine` is a no-op placeholder used by the unused-var
-    // silencer below; the real header is `layout.header`.
-    _ = headerModelLine
+
+    // Header is rebuilt whenever the context-usage reading changes, so
+    // the capacity suffix stays fresh. As a captured closure (not a
+    // local `func`) so the auto-compact callback can be @Sendable.
+    let cwdShort = shortenPath(cwd, to: max(20, runner.terminal.width - 4))
+    let renderHeader: @MainActor @Sendable (String) -> Void = { capacityHint in
+        var modelLine = "  \(modelLabel)"
+        if !capacityHint.isEmpty {
+            modelLine += "  \(capacityHint)"
+        }
+        layout.header.lines = [
+            Style.header("✻ kwwk coding agent"),
+            Style.dimmed(modelLine),
+            Style.dimmed("  \(cwdShort)"),
+        ]
+    }
+    renderHeader("")
     layout.install(into: runner.tui)
     layout.fitViewport(height: runner.terminal.height)
     runner.focus(layout.promptRow)
@@ -88,6 +97,56 @@ func runCodingTUIInternal(
     )
     await statusBar.render()
 
+    // Auto-compact controller. Watches per-turn usage and summarizes
+    // the transcript when it approaches the model's contextWindow.
+    // The controller fires `performCompact` only on `agentEnd` so we
+    // never rewrite `agent.state.messages` while the loop is mid-flight.
+    let autoCompact = AutoCompactController(
+        agent: agent,
+        backgroundManager: bgManager,
+        sessionId: sessionId,
+        threshold: autoCompactThreshold,
+        onStatusChange: { status in
+            switch status {
+            case .compacting(let count):
+                statusBar.setCompacting(messageCount: count)
+                notifications.append(Style.dimmed("  auto-compact: summarizing \(count) messages…"))
+                if !modal.isOpen { recomputeTranscript() }
+                runner.tui.requestRender()
+            case .idle:
+                statusBar.setMode(.idle)
+            }
+        },
+        onUsageChange: { usage in
+            renderHeader(formatCapacityHint(
+                usage: usage,
+                threshold: autoCompactThreshold
+            ))
+            runner.tui.requestRender()
+        },
+        onCompactFinished: { outcome in
+            // Surface outcome as a transcript notification. The
+            // `notifications` log is cleared on the next Enter so the
+            // "compacted N → 1 recap" line doesn't stick around forever.
+            switch outcome {
+            case .compacted(let n, let hasLedger):
+                var note = "  auto-compact: compacted \(n) messages → 1 recap"
+                if hasLedger { note += " (+ running-task ledger)" }
+                notifications.append(Style.prompt(note))
+            case .refusedAgentBusy:
+                // Can't happen: we only enter maybeCompact on agentEnd
+                // and the guard in `performCompact` is belt-and-braces.
+                break
+            case .refusedTooFewMessages:
+                break  // never surface for the auto path
+            case .failed(let msg):
+                notifications.append(Style.error("  auto-compact: \(msg)"))
+            }
+            if !modal.isOpen { recomputeTranscript() }
+            runner.tui.requestRender()
+        }
+    )
+
     _ = agent.subscribe { event, _ in
         await MainActor.run {
             renderer.apply(event)
@@ -101,12 +160,20 @@ func runCodingTUIInternal(
             case .agentStart:
                 statusBar.setMode(.streaming)
             case .agentEnd:
-                statusBar.setMode(.idle)
+                // Only flip to idle when no auto-compact took over.
+                // `observe(event:)` below runs synchronously-enough that
+                // its status-change callback beats this switch, so if
+                // a compact is about to fire the bar will read
+                // "auto-compacting…" on the next render.
+                if !autoCompact.isCompacting {
+                    statusBar.setMode(.idle)
+                }
             default: break
             }
             layout.fitViewport(height: runner.terminal.height)
             runner.tui.requestRender()
         }
+        await autoCompact.observe(event)
         await statusBar.render()
     }
 
@@ -150,14 +217,17 @@ func runCodingTUIInternal(
 
             let parsed = SlashInput.parse(text)
 
-            // Slash commands always work, even while streaming, because they
-            // don't call `agent.prompt`. For LLM prompts we check state
-            // first so we can steer instead of clobbering the current turn.
-            if case .prompt = parsed, agent.state.isStreaming {
+            // Slash commands always work, even while streaming or
+            // auto-compacting, because they don't call `agent.prompt`.
+            // For LLM prompts we check state first so we can steer
+            // instead of racing the current turn / the pending
+            // message-array replacement.
+            if case .prompt = parsed, agent.state.isStreaming || autoCompact.isCompacting {
                 agent.steer(.user(UserMessage(content: [.text(TextContent(text: text))])))
                 layout.input.value = ""
                 notifications.clear()
-                notifications.append(Style.dimmed("  queued — will run after the current turn finishes"))
+                let reason = autoCompact.isCompacting ? "auto-compact finishes" : "the current turn finishes"
+                notifications.append(Style.dimmed("  queued — will run after \(reason)"))
                 recomputeTranscript()
                 runner.tui.requestRender()
                 return
