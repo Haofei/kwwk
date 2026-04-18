@@ -26,6 +26,18 @@ final class TUIRunner: @unchecked Sendable {
     private var sigtermSource: DispatchSourceSignal?
     private var exitContinuation: CheckedContinuation<Void, Never>?
     private var pendingExitCode: Int32?
+    /// Pending flush for a buffered standalone ESC. `StdinBuffer` holds a
+    /// lone 0x1B byte waiting for a potential CSI continuation (arrow keys,
+    /// function keys, etc.). If no continuation arrives we must flush it
+    /// manually — otherwise an isolated Escape press is swallowed forever
+    /// and keybindings like "cancel" never fire. See the escape-dispatch
+    /// scheduling in `ingest`.
+    private var pendingEscapeFlush: DispatchWorkItem?
+    /// Delay before a buffered ESC is treated as a standalone press. 50ms
+    /// is well under a user's key-repeat threshold and safely above the
+    /// ~1ms it takes a terminal to deliver the full CSI sequence for arrow
+    /// keys / function keys.
+    private static let escapeFlushDelayMs: Int = 50
 
     init(useAlternateScreen: Bool = true, hideCursor: Bool = false) {
         self.terminal = StdoutTerminal()
@@ -126,8 +138,22 @@ final class TUIRunner: @unchecked Sendable {
 
     // MARK: - Input routing
 
-    private func ingest(_ data: Data) {
-        let sequences = stdinBuffer.feed(data)
+    /// Feed a raw stdin chunk into the input pipeline. Normally invoked by
+    /// `RawStdin`'s callback, but made internal so tests can drive the
+    /// escape-flush timer without setting up real termios.
+    func ingest(_ data: Data) {
+        // Cancel any pending ESC flush — new data arrived, so the ESC is
+        // either part of a CSI sequence (handled by `takeOne`) or irrelevant
+        // (user kept typing). Either way, don't flush it as a standalone.
+        lock.withLock {
+            pendingEscapeFlush?.cancel()
+            pendingEscapeFlush = nil
+        }
+        handleSequences(stdinBuffer.feed(data))
+        scheduleEscapeFlushIfNeeded()
+    }
+
+    private func handleSequences(_ sequences: [String]) {
         for seq in sequences {
             if let event = Keys.parse(seq), keybindings.dispatch(event) {
                 tui.requestRender()
@@ -137,6 +163,25 @@ final class TUIRunner: @unchecked Sendable {
             target?.handleInput(seq)
             tui.requestRender()
         }
+    }
+
+    /// If the stdin buffer currently holds an undelivered byte stream
+    /// (e.g. a standalone ESC waiting to see whether it starts a CSI
+    /// sequence), schedule a short-delay flush. Cancelled on the next
+    /// `ingest` so real escape sequences aren't split.
+    private func scheduleEscapeFlushIfNeeded() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let flushed = self.stdinBuffer.flushOnTimeout()
+            if !flushed.isEmpty {
+                self.handleSequences(flushed)
+            }
+        }
+        lock.withLock { pendingEscapeFlush = work }
+        DispatchQueue.global().asyncAfter(
+            deadline: .now() + .milliseconds(Self.escapeFlushDelayMs),
+            execute: work
+        )
     }
 }
 #endif
