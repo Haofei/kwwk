@@ -17,6 +17,7 @@ let package = Package(
         .executable(name: "kw-tui-snapshot", targets: ["kw-tui-snapshot"]),
         .executable(name: "kw-generate-models", targets: ["kw-generate-models"]),
         .executable(name: "kw-login", targets: ["kw-login"]),
+        .executable(name: "kw-e2e-bg", targets: ["kw-e2e-bg"]),
     ],
     targets: [
         .target(
@@ -71,6 +72,11 @@ let package = Package(
             name: "kw-login",
             dependencies: ["KWAI"],
             path: "Examples/Login"
+        ),
+        .executableTarget(
+            name: "kw-e2e-bg",
+            dependencies: ["KWAI", "KWAgent", "KWCoding"],
+            path: "Examples/BackgroundE2E"
         ),
         .testTarget(
             name: "KWAITests",

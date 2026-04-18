@@ -87,6 +87,25 @@ struct BashBackgroundRunnerTests {
         let snap = await manager.get(taskId)
         #expect(snap?.status == .killed)
     }
+
+    @Test("extraEnv is propagated to the child process")
+    func extraEnv() async {
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let runner = BashBackgroundRunner(
+            command: "echo $KW_BGTEST_VAR",
+            extraEnv: ["KW_BGTEST_VAR": "extraenv-works"]
+        )
+        let (taskId, file) = await manager.spawn(runner: runner, sessionId: "s1")
+        let done = await awaitUntil(3000) {
+            let s = await manager.get(taskId)
+            return s?.status != .running
+        }
+        #expect(done)
+        let contents = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        #expect(contents.contains("extraenv-works"))
+    }
 }
 
 @Suite("Bash tool + background manager")
@@ -165,6 +184,54 @@ struct BashToolBackgroundTests {
             #expect(code == 0)
         } else {
             Issue.record("expected exitCode")
+        }
+    }
+
+    @Test("missing command argument throws")
+    func missingCommand() async {
+        let cwdDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: cwdDir) }
+        let manager = BackgroundTaskManager(outputDir: makeTempDir())
+        let tool = createBashTool(cwd: cwdDir.path, options: BashToolOptions(manager: manager))
+        await #expect(throws: Error.self) {
+            _ = try await tool.execute(
+                "call-1",
+                .object(["run_in_background": .bool(true)]),
+                nil, nil
+            )
+        }
+    }
+
+    @Test("user-supplied timeout is capped at maxTimeoutSeconds")
+    func timeoutCap() async throws {
+        let cwdDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: cwdDir) }
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        // Soft default 2s, cap 3s. A request for 9999s should be clamped to 3s.
+        let tool = createBashTool(cwd: cwdDir.path, options: BashToolOptions(
+            defaultTimeoutSeconds: 2,
+            maxTimeoutSeconds: 3,
+            manager: manager,
+            sessionId: "s1",
+            autoBackgroundOnTimeout: true
+        ))
+        let start = Date()
+        let result = try await tool.execute(
+            "call-1",
+            .object([
+                "command": .string("sleep 10"),
+                "timeout": .int(9999),
+            ]),
+            nil, nil
+        )
+        let elapsed = Date().timeIntervalSince(start)
+        // We expect the soft timeout (cap=3s) to fire and the command to flip.
+        #expect(elapsed < 5)
+        if case .object(let obj) = result.details ?? .null,
+           case .string(let status) = obj["status"] ?? .null {
+            #expect(status == "auto_backgrounded")
         }
     }
 
@@ -292,6 +359,76 @@ struct BgStatusToolTests {
         #expect(gone)
         let snap = await manager.get(taskId)
         #expect(snap?.status == .killed)
+    }
+
+    @Test("unknown action throws")
+    func unknownAction() async {
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        await #expect(throws: Error.self) {
+            _ = try await tool.execute(
+                "c1",
+                .object(["action": .string("nope")]),
+                nil, nil
+            )
+        }
+    }
+
+    @Test("status missing task_id throws")
+    func statusMissingId() async {
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        await #expect(throws: Error.self) {
+            _ = try await tool.execute(
+                "c1",
+                .object(["action": .string("status")]),
+                nil, nil
+            )
+        }
+    }
+
+    @Test("kill on already-terminal task is graceful")
+    func killAlreadyTerminal() async throws {
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let runner = BashBackgroundRunner(command: "echo done")
+        let (taskId, _) = await manager.spawn(runner: runner, sessionId: "s1")
+        _ = await awaitUntil(3000) {
+            let s = await manager.get(taskId)
+            return s?.status != .running
+        }
+        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let result = try await tool.execute(
+            "c1",
+            .object(["action": .string("kill"), "task_id": .string(taskId)]),
+            nil, nil
+        )
+        // Non-running tasks return a friendly result, not a throw.
+        if case .object(let obj) = result.details ?? .null,
+           case .bool(let killed) = obj["killed"] ?? .null {
+            #expect(killed == false)
+        }
+    }
+
+    @Test("list with no tasks returns empty")
+    func listEmpty() async throws {
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let result = try await tool.execute(
+            "c1",
+            .object(["action": .string("list")]),
+            nil, nil
+        )
+        if case .text(let t) = result.content.first {
+            #expect(t.text.contains("No background tasks"))
+        }
     }
 
     @Test("task_id scoped to another session is hidden")

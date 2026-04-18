@@ -175,6 +175,13 @@ public enum AgentLoop {
                     emit: emit,
                     streamFn: streamFn
                 )
+                // Append to the in-loop context BEFORE running tools, so the
+                // next turn's request body carries the assistant turn
+                // (including any tool_use / function_call items) right in
+                // front of the upcoming tool_result / function_call_output.
+                // Providers like OpenAI Responses and Anthropic Messages
+                // enforce that ordering.
+                currentContext.messages.append(.assistant(assistant))
                 newMessages.append(.assistant(assistant))
 
                 if assistant.stopReason == .error || assistant.stopReason == .aborted {

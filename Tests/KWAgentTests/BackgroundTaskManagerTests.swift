@@ -304,6 +304,136 @@ struct BackgroundTaskManagerTests {
         #expect(!BackgroundTaskManager.looksLikePrompt("compile error: cannot find symbol"))
     }
 
+    @Test("adopt registers an externally-started task and awaits its completion")
+    func adopt() async {
+        let outputDir = makeOutputDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let spec = BackgroundTaskSpec(
+            kind: "test",
+            label: "adopted",
+            description: nil,
+            hardTimeoutSeconds: 60
+        )
+        let (taskId, _) = await manager.adopt(
+            spec: spec,
+            sessionId: "sA",
+            waitForCompletion: { cancel in
+                _ = cancel
+                try? await Task.sleep(nanoseconds: 30_000_000)
+                return BackgroundTaskOutcome(
+                    success: true,
+                    summary: "done",
+                    details: .object(["statusCode": .int(200)])
+                )
+            }
+        )
+        let ok = await awaitUntil(2000) {
+            let s = await manager.get(taskId)
+            return s?.status == .completed
+        }
+        #expect(ok)
+        let snap = await manager.get(taskId)
+        #expect(snap?.outcome?.summary == "done")
+        if case .object(let obj) = snap?.outcome?.details ?? .null,
+           case .int(let code) = obj["statusCode"] ?? .null {
+            #expect(code == 200)
+        } else {
+            Issue.record("expected statusCode detail")
+        }
+    }
+
+    @Test("killAll with nil sessionId kills every running task")
+    func killAllGlobal() async {
+        let outputDir = makeOutputDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        _ = await manager.spawn(runner: ForeverRunner(label: "a"), sessionId: "s1")
+        _ = await manager.spawn(runner: ForeverRunner(label: "b"), sessionId: "s2")
+        _ = await manager.spawn(runner: ForeverRunner(label: "c"), sessionId: nil)
+        try? await Task.sleep(nanoseconds: 40_000_000)
+        await manager.killAll(sessionId: nil)
+        let all = await manager.list(sessionId: nil)
+        let running = all.filter { $0.status == .running }.count
+        #expect(running == 0)
+    }
+
+    @Test("cleanup prunes terminal tasks older than the cutoff")
+    func cleanupOld() async {
+        let outputDir = makeOutputDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let (taskId, _) = await manager.spawn(
+            runner: FauxRunner(delayMs: 10),
+            sessionId: "s1"
+        )
+        _ = await awaitUntil(2000) {
+            let s = await manager.get(taskId)
+            return s?.status == .completed
+        }
+        #expect(await manager.get(taskId) != nil)
+        // -1 forces everything older than 1s ago into the "too old" set;
+        // completedAt is essentially now, so we use a small positive cutoff.
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        await manager.cleanup(olderThanSeconds: 1)
+        #expect(await manager.get(taskId) == nil)
+    }
+
+    @Test("hard timeout cancels a running task")
+    func hardTimeout() async {
+        let outputDir = makeOutputDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        struct Forever2: BackgroundTaskRunner {
+            let spec = BackgroundTaskSpec(
+                kind: "test",
+                label: "forever",
+                description: nil,
+                // 1-second hard timeout so the test runs fast.
+                hardTimeoutSeconds: 1
+            )
+            func run(
+                taskId: String,
+                outputFile: URL,
+                cancellation: CancellationHandle,
+                onDone: @escaping @Sendable (BackgroundTaskOutcome) -> Void
+            ) {
+                Task.detached {
+                    while !cancellation.isCancelled {
+                        try? await Task.sleep(nanoseconds: 30_000_000)
+                    }
+                    onDone(BackgroundTaskOutcome(success: false, summary: "deadline"))
+                }
+            }
+        }
+        let (taskId, _) = await manager.spawn(runner: Forever2(), sessionId: "s1")
+        let done = await awaitUntil(4000) {
+            let s = await manager.get(taskId)
+            return s?.status != .running
+        }
+        #expect(done)
+    }
+
+    @Test("unsubscribe stops delivery")
+    func unsubscribeStopsDelivery() async {
+        let outputDir = makeOutputDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let received = Received()
+        let handle = await manager.onNotification { notif in
+            await received.add(notif)
+        }
+        _ = await manager.spawn(runner: FauxRunner(label: "a", delayMs: 10), sessionId: "s1")
+        _ = await awaitUntil(2000) { await received.count() >= 1 }
+
+        await handle.unsubscribe()
+
+        _ = await manager.spawn(runner: FauxRunner(label: "b", delayMs: 10), sessionId: "s1")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let final = await received.count()
+        #expect(final == 1)
+    }
+
     @Test("notification messageText includes output-file and kind")
     func messageTextShape() async {
         let outputDir = makeOutputDir()
@@ -331,6 +461,56 @@ struct BackgroundTaskManagerTests {
         #expect(text.contains("<output-file>"))
         #expect(text.contains("<exit-code>0</exit-code>"))
         #expect(text.contains("<hint>"))
+    }
+
+    @Test("notification escapes XML-unsafe characters in labels")
+    func escapesXML() {
+        let n = BackgroundTaskNotification(
+            taskId: "bg_x",
+            sessionId: nil,
+            kind: "bash",
+            label: "echo 'a & b' <raw>",
+            description: nil,
+            status: .completed,
+            outcome: BackgroundTaskOutcome(
+                success: true,
+                summary: "exit 0",
+                details: nil,
+                errorMessage: nil
+            ),
+            outputTail: "",
+            outputFile: nil,
+            durationMs: 10,
+            stalled: false
+        )
+        let text = n.messageText()
+        #expect(text.contains("echo &apos;a &amp; b&apos; &lt;raw&gt;") ||
+                text.contains("echo 'a &amp; b' &lt;raw&gt;"))
+        // Implementation may choose to leave single quotes alone; the core
+        // requirement is that `&` and `<` / `>` are escaped.
+        #expect(!text.contains("<raw>"))
+        #expect(!text.contains("& b"))
+    }
+
+    @Test("stalled notification includes a suggestion and no outcome")
+    func stalledShape() {
+        let n = BackgroundTaskNotification(
+            taskId: "bg_x",
+            sessionId: nil,
+            kind: "bash",
+            label: "pkg install",
+            description: nil,
+            status: .running,
+            outcome: nil,
+            outputTail: "Do you wish to continue? [y/n]",
+            outputFile: "/tmp/foo.log",
+            durationMs: 60_000,
+            stalled: true
+        )
+        let text = n.messageText()
+        #expect(text.contains("<status>stalled</status>"))
+        #expect(text.contains("<suggestion>"))
+        #expect(text.contains("appears stuck"))
     }
 }
 

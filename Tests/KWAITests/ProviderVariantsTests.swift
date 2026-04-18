@@ -191,4 +191,28 @@ struct ProviderVariantsTests {
         try? await Task.sleep(nanoseconds: 20_000_000)
         #expect(client.lastRequest?.headers["copilot-vision-request"] == "true")
     }
+
+    // MARK: - ChatGPT Codex
+
+    @Test("ChatGPT Codex routes to backend-api/codex/responses with account header")
+    func codexURL() async throws {
+        let client = StubSSEClient(body: Self.openaiResponsesSSE)
+        let provider = ProviderVariants.chatgptCodex(
+            accessToken: "codex-bearer",
+            accountId: "acct-xyz",
+            client: client
+        )
+        let model = Model(id: "gpt-5-codex", name: "gpt-5-codex", api: "chatgpt-codex", provider: "chatgpt-codex")
+        _ = provider.stream(
+            model: model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: nil
+        )
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let u = client.lastRequest?.url.absoluteString ?? ""
+        #expect(u == "https://chatgpt.com/backend-api/codex/responses")
+        #expect(client.lastRequest?.headers["authorization"] == "Bearer codex-bearer")
+        #expect(client.lastRequest?.headers["chatgpt-account-id"] == "acct-xyz")
+        #expect(client.lastRequest?.headers["openai-beta"] == "responses=experimental")
+    }
 }

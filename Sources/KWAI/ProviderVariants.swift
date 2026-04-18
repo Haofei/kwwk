@@ -88,6 +88,47 @@ public enum ProviderVariants {
         )
     }
 
+    // MARK: - ChatGPT Codex (Responses route under chatgpt.com)
+    //
+    // The ChatGPT subscription Codex backend exposes the OpenAI Responses API
+    // at `https://chatgpt.com/backend-api/codex/responses`. The auth model:
+    //
+    //   authorization: Bearer <access_token>        ← JWT from ~/.codex/auth.json
+    //   chatgpt-account-id: <account_id>            ← JWT claim, also in auth.json
+    //   openai-beta: responses=experimental
+    //
+    // `accessToken` should be fresh. Callers typically pair this with
+    // `OpenAICodexOAuthProvider.refresh(...)` via `OAuthManager` to get
+    // auto-refresh.
+    public static func chatgptCodex(
+        accessToken: String? = nil,
+        accountId: String? = nil,
+        client: HTTPClient = URLSessionHTTPClient(),
+        originator: String = "kw-cli"
+    ) -> OpenAIResponsesProvider {
+        var extra: [String: String] = [
+            "openai-beta": "responses=experimental",
+            "originator": originator,
+        ]
+        if let accountId {
+            extra["chatgpt-account-id"] = accountId
+        }
+        return OpenAIResponsesProvider(
+            api: "chatgpt-codex",
+            client: client,
+            defaultBaseURL: URL(string: "https://chatgpt.com")!,
+            defaultAPIKey: accessToken,
+            extraHeaders: extra,
+            // Codex requires stateless inference: the endpoint rejects
+            // requests with `store: true` (the Responses API default).
+            bodyOverrides: ["store": .bool(false)],
+            urlBuilder: { _, _, _ in
+                URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+            },
+            authHeaderBuilder: { token in ["authorization": "Bearer \(token)"] }
+        )
+    }
+
     // MARK: - GitHub Copilot (Chat Completions route)
     //
     // Copilot proxies a chat/completions endpoint at

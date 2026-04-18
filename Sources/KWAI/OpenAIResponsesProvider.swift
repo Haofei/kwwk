@@ -25,6 +25,9 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
     public let extraHeaders: [String: String]
     public let urlBuilder: URLBuilder
     public let authHeaderBuilder: AuthHeaderBuilder
+    /// Request-body fields merged in last (so they override defaults). Use
+    /// for vendor quirks like ChatGPT Codex requiring `store: false`.
+    public let bodyOverrides: [String: JSONValue]
 
     public init(
         api: String = "openai-responses",
@@ -32,6 +35,7 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
         defaultBaseURL: URL = URL(string: "https://api.openai.com")!,
         defaultAPIKey: String? = nil,
         extraHeaders: [String: String] = [:],
+        bodyOverrides: [String: JSONValue] = [:],
         urlBuilder: URLBuilder? = nil,
         authHeaderBuilder: AuthHeaderBuilder? = nil
     ) {
@@ -40,6 +44,7 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
         self.defaultBaseURL = defaultBaseURL
         self.defaultAPIKey = defaultAPIKey
         self.extraHeaders = extraHeaders
+        self.bodyOverrides = bodyOverrides
         self.urlBuilder = urlBuilder ?? { model, _, fallback in
             var base = model.baseUrl.isEmpty ? fallback.absoluteString : model.baseUrl
             while base.hasSuffix("/") { base.removeLast() }
@@ -64,7 +69,12 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
 
         let body: Data
         do {
-            body = try Self.encodeBody(model: model, context: context, options: options)
+            body = try Self.encodeBody(
+                model: model,
+                context: context,
+                options: options,
+                bodyOverrides: bodyOverrides
+            )
         } catch {
             let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
             out.push(.error(reason: .error, error: msg))
@@ -87,9 +97,19 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
                 url: url, method: "POST", headers: headers, body: body
             )
             if response.statusCode >= 400 {
+                // Collect whatever the server wrote (usually a small JSON
+                // error body). Surface it so debugging doesn't require
+                // network captures.
+                var body = Data()
+                do {
+                    for try await byte in stream { body.append(byte) }
+                } catch {
+                    // ignore — best effort
+                }
+                let bodyText = String(data: body, encoding: .utf8) ?? ""
                 let msg = Self.makeError(
                     api: api, model: model,
-                    text: "OpenAI Responses returned status \(response.statusCode)"
+                    text: "OpenAI Responses returned status \(response.statusCode): \(bodyText)"
                 )
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
@@ -275,7 +295,8 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
     // MARK: - Encoding
 
     private static func encodeBody(
-        model: Model, context: Context, options: StreamOptions?
+        model: Model, context: Context, options: StreamOptions?,
+        bodyOverrides: [String: JSONValue] = [:]
     ) throws -> Data {
         var root: [String: Any] = [
             "model": model.id,
@@ -313,6 +334,12 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
         }
         if let meta = options?.metadata, let any = anyFromJSONValue(.object(meta)) {
             root["metadata"] = any
+        }
+        // Apply vendor-specific overrides last so they win against defaults.
+        for (key, value) in bodyOverrides {
+            if let any = anyFromJSONValue(value) {
+                root[key] = any
+            }
         }
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
     }

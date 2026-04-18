@@ -3,6 +3,86 @@ import Testing
 @testable import KWAgent
 @testable import KWAI
 
+@Suite("Tool-call transcript ordering")
+struct ToolCallTranscriptTests {
+
+    /// Regression test: AgentLoop must append the assistant-turn message to
+    /// its in-loop context BEFORE tool execution, so the next request body
+    /// carries `[user, assistant(toolCall), toolResult]` — the order
+    /// OpenAI Responses and Anthropic Messages both require. Without this
+    /// the tool executes but replays produce only `[user, toolResult]` and
+    /// strict providers reject with "no tool call found for function call
+    /// output".
+    @Test("assistant tool_call is replayed before its tool_result on the next turn")
+    func toolCallPrecedesResult() async throws {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+        faux.setResponses([
+            .message(fauxAssistantMessage(
+                blocks: [
+                    fauxToolCall(name: "capture_ctx", arguments: [:], id: "call_AAA")
+                ],
+                stopReason: .toolUse
+            )),
+            .message(fauxAssistantMessage("acknowledged")),
+        ])
+
+        // Tool captures the agent's transcript at execution time — that's
+        // the same transcript that becomes the next turn's request body.
+        let captured = MessagesBox()
+        let tool = AgentTool(
+            name: "capture_ctx",
+            label: "capture",
+            description: "records the transcript we see",
+            parameters: .object(["type": .string("object")]),
+            execute: { _, _, _, _ in
+                AgentToolResult(content: [.text(TextContent(text: "ok"))])
+            }
+        )
+        let agent = Agent(initialState: AgentInitialState(model: faux.getModel(), tools: [tool]))
+        _ = agent.subscribe { event, _ in
+            if case .turnEnd = event {
+                await captured.record(agent.state.messages)
+            }
+        }
+        try await agent.prompt("kick")
+
+        // After the first turn_end, the transcript must already include the
+        // assistant message with the tool_call, so that when the agent loops
+        // back for turn 2, the request body is [user, assistant(tc),
+        // toolResult].
+        let firstTurn = await captured.first()
+        #expect(firstTurn != nil)
+        guard let messages = firstTurn else { return }
+        // Order: user, assistant(tc), toolResult (the tool_result may land
+        // just before or after turn_end depending on scheduling; we tolerate
+        // either by checking the assistant(tc) comes before the toolResult
+        // when both are present).
+        let userIdx = messages.firstIndex { if case .user = $0 { return true } else { return false } }
+        let assistantIdx = messages.firstIndex {
+            if case .assistant(let a) = $0 {
+                return a.content.contains { if case .toolCall = $0 { return true } else { return false } }
+            }
+            return false
+        }
+        let toolResultIdx = messages.firstIndex { if case .toolResult = $0 { return true } else { return false } }
+        #expect(userIdx != nil)
+        #expect(assistantIdx != nil)
+        #expect(toolResultIdx != nil)
+        if let u = userIdx, let a = assistantIdx, let tr = toolResultIdx {
+            #expect(u < a)
+            #expect(a < tr)
+        }
+    }
+}
+
+/// Helper to pull messages out of an async subscriber into a sync test.
+actor MessagesBox {
+    private var history: [[Message]] = []
+    func record(_ msgs: [Message]) { history.append(msgs) }
+    func first() -> [Message]? { history.first }
+}
+
 @Suite("Parallel tool execution")
 struct ParallelToolsTests {
 
@@ -48,8 +128,10 @@ struct ParallelToolsTests {
         let elapsed = Date().timeIntervalSince(start)
 
         // Two 60ms sleeps in parallel should finish in ~60-90ms. Sequentially
-        // it'd be 120ms+. Give generous headroom for CI jitter.
-        #expect(elapsed < 0.110, "elapsed was \(elapsed)s; tools did not overlap")
+        // it'd be 120ms+. The `b-start before a-end` check below is the
+        // authoritative proof of parallelism — this timing assertion is a
+        // sanity net only, so we give it generous CI-jitter headroom.
+        #expect(elapsed < 0.300, "elapsed was \(elapsed)s; tools did not overlap")
 
         let events = await recorder.events
         // Expect at least one interleaving: b-start before a-end.

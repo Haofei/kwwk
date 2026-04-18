@@ -68,6 +68,23 @@ struct TmuxSessionManagerTests {
         let after = await manager.list().map(\.paneId)
         #expect(!after.contains(info.paneId))
     }
+
+    @Test("methods throw .unavailable when tmux is not on PATH")
+    func unavailableRaises() async {
+        let manager = TmuxSessionManager(tmuxPath: "/definitely-not-real/tmux-absent")
+        await #expect(throws: TmuxError.self) {
+            _ = try await manager.startPane(command: "echo hi")
+        }
+        await #expect(throws: TmuxError.self) {
+            _ = try await manager.sendKeys("%1", keys: "Enter")
+        }
+        await #expect(throws: TmuxError.self) {
+            _ = try await manager.capture("%1")
+        }
+        await #expect(throws: TmuxError.self) {
+            _ = try await manager.killPane("%1")
+        }
+    }
 }
 
 @Suite("Tmux tool")
@@ -79,6 +96,51 @@ struct TmuxToolTests {
         let bogus = TmuxSessionManager(tmuxPath: "/definitely-not-a-real-path/tmux-nope")
         let tool = await createTmuxTool(manager: bogus)
         #expect(tool == nil)
+    }
+
+    @Test("unknown action throws")
+    func unknownAction() async {
+        // Use a fake-path manager so the tool factory returns nil on this
+        // host; we reach directly into a tool with a real manager only if
+        // tmux is available.
+        guard await tmuxAvailable() else { return }
+        guard let tool = await createTmuxTool() else { return }
+        await #expect(throws: Error.self) {
+            _ = try await tool.execute(
+                "call-1",
+                .object(["action": .string("nope")]),
+                nil, nil
+            )
+        }
+    }
+
+    @Test("start without command throws")
+    func startMissingCommand() async throws {
+        guard await tmuxAvailable() else { return }
+        guard let tool = await createTmuxTool() else { return }
+        await #expect(throws: Error.self) {
+            _ = try await tool.execute(
+                "call-1",
+                .object(["action": .string("start")]),
+                nil, nil
+            )
+        }
+    }
+
+    @Test("list action works when there are no panes")
+    func listEmpty() async throws {
+        guard await tmuxAvailable() else { return }
+        let manager = makeSessionManager()
+        defer { Task { await manager.teardown() } }
+        guard let tool = await createTmuxTool(manager: manager) else { return }
+        let result = try await tool.execute(
+            "call-1",
+            .object(["action": .string("list")]),
+            nil, nil
+        )
+        if case .text(let t) = result.content.first {
+            #expect(t.text.contains("No tmux panes"))
+        }
     }
 
     @Test("start → capture → kill round trip via the tool interface")
