@@ -59,6 +59,20 @@ func runCodingTUIInternal(
     layout.install(into: runner.tui)
     layout.fitViewport(height: runner.terminal.height)
     runner.focus(layout.promptRow)
+
+    // Paste plumbing: `onPaste` is called whenever the terminal
+    // delivers a bracketed-paste sequence. We route it through the
+    // AttachmentStore so long / multi-line bodies stay out of the
+    // single-line input, and show up as compact tokens instead.
+    let attachments = AttachmentStore()
+    layout.input.onPaste = { body in
+        handlePastedBody(
+            body,
+            input: layout.input,
+            attachments: attachments,
+            tui: runner.tui
+        )
+    }
     _ = runner.terminal.onResize { _, h in
         Task { @MainActor in
             layout.fitViewport(height: h)
@@ -258,8 +272,26 @@ func runCodingTUIInternal(
             // no transcript notification needed since the panel is
             // persistent until the message drains.
             if case .prompt = parsed, agent.state.isStreaming || autoCompact.isCompacting {
-                agent.steer(.user(UserMessage(content: [.text(TextContent(text: text))])))
+                // Build the attachment-enriched message just like the
+                // non-streaming path so a pasted @path / image goes
+                // into the queue with the right shape — otherwise a
+                // queued prompt would drop its attachments when it
+                // finally drains.
+                let built = buildPromptWithAttachments(
+                    text: text,
+                    store: attachments,
+                    cwd: cwd,
+                    modelSupportsImages: agent.state.model.input.contains(.image)
+                )
+                var blocks: [UserBlock] = [.text(TextContent(text: built.text))]
+                for img in built.images { blocks.append(.image(img)) }
+                agent.steer(.user(UserMessage(content: blocks)))
+                attachments.clear()
                 layout.input.value = ""
+                if let summary = built.summary {
+                    notifications.append(Style.dimmed("  " + summary))
+                    recomputeTranscript()
+                }
                 refreshQueuePanel()
                 runner.tui.requestRender()
                 return
@@ -288,10 +320,27 @@ func runCodingTUIInternal(
                     recomputeTranscript()
                     runner.tui.requestRender()
                 }
-            case .prompt(let body):
+            case .prompt:
+                // Rebuild with attachments — the raw `text` may carry
+                // `@path` tokens and `[pasted-text #N]` placeholders
+                // from earlier paste events.
+                let built = buildPromptWithAttachments(
+                    text: text,
+                    store: attachments,
+                    cwd: cwd,
+                    modelSupportsImages: agent.state.model.input.contains(.image)
+                )
+                attachments.clear()
+                if let summary = built.summary {
+                    notifications.append(Style.dimmed("  " + summary))
+                    recomputeTranscript()
+                    runner.tui.requestRender()
+                }
+                let promptText = built.text
+                let promptImages = built.images
                 Task.detached {
                     do {
-                        try await agent.prompt(body)
+                        try await agent.prompt(promptText, images: promptImages)
                     } catch {
                         await MainActor.run {
                             layout.status.lines = [Style.error("error: \(error)")]
@@ -391,6 +440,57 @@ private func shortenPath(_ path: String, to maxLen: Int) -> String {
     let head = path.prefix(maxLen / 2 - 1)
     let tail = path.suffix(maxLen / 2 - 2)
     return "\(head)…\(tail)"
+}
+
+/// Decide how to route a bracketed-paste body into the single-line
+/// input. Three buckets:
+///   - single-line absolute/home/relative path → insert as `@<path> `
+///     so the token survives editing and resolves at submit time.
+///   - small single-line text (< 80 chars, no newlines) → insert
+///     inline verbatim.
+///   - anything else (multi-line, huge paste) → register with the
+///     attachment store and insert a short `[pasted-text #N]`
+///     placeholder so the user sees what's pending without the input
+///     line exploding.
+@MainActor
+func handlePastedBody(
+    _ body: String,
+    input: InputComponent,
+    attachments: AttachmentStore,
+    tui: TUI,
+    inlineLimit: Int = 80
+) {
+    if looksLikeSinglePath(body) {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip surrounding quotes (Finder drag-n-drop wraps paths with
+        // whitespace in double quotes).
+        let unquoted: String = {
+            var t = trimmed
+            if t.count >= 2, let first = t.first, let last = t.last,
+               (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+                t = String(t.dropFirst().dropLast())
+            }
+            return t
+        }()
+        input.insert("@\(unquoted) ")
+        tui.requestRender()
+        return
+    }
+
+    // Multi-line or long paste → promote to a pasted-text attachment.
+    // The threshold is generous enough that an IDE one-liner
+    // (e.g. a copied SQL query) still inserts directly, but a multi-
+    // paragraph paste goes through the attachment path.
+    if body.contains("\n") || body.count > inlineLimit {
+        let token = attachments.addPastedText(body)
+        input.insert("\(token) ")
+        tui.requestRender()
+        return
+    }
+
+    // Plain short paste: insert as-is, no transformation.
+    input.insert(body)
+    tui.requestRender()
 }
 
 /// Flatten a queued user message to a single truncated line for the

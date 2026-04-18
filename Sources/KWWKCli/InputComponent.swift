@@ -9,6 +9,13 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
     var focused: Bool = false
     var wantsKeyRelease: Bool { false }
 
+    /// Invoked with the body of a bracketed-paste sequence (wrapper
+    /// stripped, body as-is — may contain newlines). When nil the
+    /// component inserts the body inline as plain text. Callers use
+    /// this to peel off paths / images / multi-line blocks before they
+    /// reach the single-line editor.
+    var onPaste: ((String) -> Void)?
+
     private var cachedOutput: [String]?
     private var cachedWidth: Int?
     private var cachedState: [Character]?
@@ -146,7 +153,46 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
 
     // MARK: - Input
 
+    // MARK: - Bracketed paste wrapper
+
+    private static let pasteStart = "\u{1B}[200~"
+    private static let pasteEnd = "\u{1B}[201~"
+
+    /// If `data` is a complete bracketed-paste sequence, return the
+    /// body; otherwise nil. `StdinBuffer` only emits completed paste
+    /// events, so this is just a wrapper-stripping helper that also
+    /// normalizes terminal line separators — macOS + most *nix shells
+    /// convert Return → `\r` when the body is typed/keystroke-sent,
+    /// but the pasted body is logically multi-line. Converting to
+    /// `\n` up front means downstream path/attachment detection can
+    /// treat newline uniformly.
+    private func extractBracketedPasteBody(_ data: String) -> String? {
+        guard data.hasPrefix(Self.pasteStart),
+              data.hasSuffix(Self.pasteEnd)
+        else { return nil }
+        let startIdx = data.index(data.startIndex, offsetBy: Self.pasteStart.count)
+        let endIdx = data.index(data.endIndex, offsetBy: -Self.pasteEnd.count)
+        let raw = String(data[startIdx..<endIdx])
+        return raw
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+    }
+
     func handleInput(_ data: String) {
+        // Bracketed paste wrapper `ESC[200~ … ESC[201~` arrives as a
+        // single synthetic sequence from StdinBuffer. Unwrap and route
+        // to `onPaste` (or insert the body as a fallback so the text
+        // isn't silently swallowed).
+        if let pasteBody = extractBracketedPasteBody(data) {
+            if let handler = onPaste {
+                handler(pasteBody)
+            } else {
+                // Flatten newlines — single-line editor — so a stray
+                // multi-line paste doesn't desync the cursor math.
+                insert(pasteBody.replacingOccurrences(of: "\n", with: " "))
+            }
+            return
+        }
         guard let event = Keys.parse(data) else {
             // Not a key we recognize — treat printable text as insertion.
             if !data.isEmpty && !data.hasPrefix("\u{1B}") { insert(data) }

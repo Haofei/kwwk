@@ -113,7 +113,27 @@ final class TranscriptRenderer {
 
     // MARK: - Formatting
 
+    /// Extract the visible text for a user message, stripping the
+    /// machine-readable `<attachments>…</attachments>` block that
+    /// `buildPromptWithAttachments` appends. The LLM still sees the
+    /// full block — this is purely what we show in the transcript.
     private func userText(_ u: UserMessage) -> String {
+        stripAttachmentsBlock(rawUserText(u))
+    }
+
+    /// Regex-free strip: remove everything from the first literal
+    /// `<attachments>` marker through the matching `</attachments>`.
+    /// Only the first block (there should be at most one) is stripped.
+    private func stripAttachmentsBlock(_ text: String) -> String {
+        guard let openRange = text.range(of: "<attachments>") else { return text }
+        guard let closeRange = text.range(of: "</attachments>", range: openRange.upperBound..<text.endIndex)
+        else { return text }
+        var out = String(text[..<openRange.lowerBound])
+        out += text[closeRange.upperBound..<text.endIndex]
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func rawUserText(_ u: UserMessage) -> String {
         u.content.compactMap { block -> String? in
             if case .text(let t) = block { return t.text } else { return nil }
         }.joined(separator: " ")

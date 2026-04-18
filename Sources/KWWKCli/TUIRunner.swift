@@ -67,6 +67,12 @@ final class TUIRunner: @unchecked Sendable {
     func run() async throws {
         try installSignalHandlers()
         tui.start()
+        // Enable DECSET 2004 — bracketed paste mode. The terminal now
+        // wraps every paste in `ESC[200~ … ESC[201~` so we can tell a
+        // 200-byte paste apart from 200 individual keypresses. Disabled
+        // again in `tearDown()` so the user's shell isn't left in an
+        // unexpected mode after `kwwk` exits.
+        terminal.write("\u{1B}[?2004h")
         try installStdin()
         await waitForExit()
         tearDown()
@@ -125,6 +131,11 @@ final class TUIRunner: @unchecked Sendable {
     }
 
     private func tearDown() {
+        // Disable bracketed paste mode before we give the terminal back
+        // to the shell; otherwise iTerm / Ghostty keep wrapping pastes
+        // and the shell prompt sees the 200~/201~ bytes as literal
+        // text.
+        terminal.write("\u{1B}[?2004l")
         tui.stop()
         lock.withLock {
             sigintSource?.cancel()
