@@ -443,7 +443,11 @@ private func shortenPath(_ path: String, to maxLen: Int) -> String {
 }
 
 /// Decide how to route a bracketed-paste body into the single-line
-/// input. Three buckets:
+/// input. Ordered checks:
+///   - NSPasteboard has an image (⌘V of a screenshot) → register
+///     with the attachment store as a clipboard image, insert
+///     `[image #N]`. The terminal's paste body is typically empty
+///     or garbage in this case, so we discard it.
 ///   - single-line absolute/home/relative path → insert as `@<path> `
 ///     so the token survives editing and resolves at submit time.
 ///   - small single-line text (< 80 chars, no newlines) → insert
@@ -460,6 +464,17 @@ func handlePastedBody(
     tui: TUI,
     inlineLimit: Int = 80
 ) {
+    // Clipboard-image takes precedence: on macOS the user can ⌘V a
+    // screenshot whose bytes never reach stdin — the terminal sends
+    // an empty/degenerate paste body while NSPasteboard holds the
+    // real image. Peek the pasteboard before interpreting the body.
+    if let image = ClipboardImageReader.readIfPresent() {
+        let token = attachments.addClipboardImage(data: image.data, mimeType: image.mimeType)
+        input.insert("\(token) ")
+        tui.requestRender()
+        return
+    }
+
     if looksLikeSinglePath(body) {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         // Strip surrounding quotes (Finder drag-n-drop wraps paths with

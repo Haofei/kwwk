@@ -28,13 +28,26 @@ final class AttachmentStore {
         }
     }
 
+    /// A clipboard image captured at paste time. Rendered in the
+    /// input as `[image #id]` and expanded to an `ImageContent` block
+    /// on submit.
+    struct ClipboardImage: Identifiable {
+        let id: Int
+        let data: Data
+        let mimeType: String
+    }
+
     private var nextPastedTextId = 1
     private(set) var pastedTexts: [PastedText] = []
+    private var nextClipboardImageId = 1
+    private(set) var clipboardImages: [ClipboardImage] = []
 
     /// Reset. Called after a send so the next prompt starts clean.
     func clear() {
         pastedTexts.removeAll()
         nextPastedTextId = 1
+        clipboardImages.removeAll()
+        nextClipboardImageId = 1
     }
 
     /// Register a pasted-text chunk and return the placeholder token
@@ -48,6 +61,15 @@ final class AttachmentStore {
 
     func pastedText(id: Int) -> PastedText? {
         pastedTexts.first(where: { $0.id == id })
+    }
+
+    /// Register a clipboard-sourced image (e.g. macOS ⌘V where
+    /// NSPasteboard holds a screenshot). Returns the placeholder token.
+    func addClipboardImage(data: Data, mimeType: String) -> String {
+        let id = nextClipboardImageId
+        nextClipboardImageId += 1
+        clipboardImages.append(ClipboardImage(id: id, data: data, mimeType: mimeType))
+        return "[image #\(id)]"
     }
 }
 
@@ -297,12 +319,38 @@ func buildPromptWithAttachments(
         expanded = expanded.replacingOccurrences(of: placeholder, with: block)
     }
 
-    // 2. Resolve @path tokens.
-    let resolved = resolveAtTokens(in: expanded, cwd: cwd)
-
     var images: [ImageContent] = []
     var attachBlocks: [String] = []
     var counts = (image: 0, file: 0, folder: 0, missing: 0, skippedImage: 0)
+
+    // 2. Expand clipboard-image placeholders (`[image #N]`). These
+    //    came from a macOS ⌘V where the system pasteboard held image
+    //    bytes directly — no filesystem path to reference. Resolve
+    //    them the same way as @-path images: attach `ImageContent`
+    //    when the model supports image input, skip-with-note
+    //    otherwise. The placeholder token is replaced with a short
+    //    `<clipboard-image id="N" />` marker so the LLM can map
+    //    positions back to attachments (and so there isn't a literal
+    //    `[image #N]` left in the prose).
+    for clip in store.clipboardImages {
+        let placeholder = "[image #\(clip.id)]"
+        let marker = "<clipboard-image id=\"\(clip.id)\" mime=\"\(clip.mimeType)\" />"
+        expanded = expanded.replacingOccurrences(of: placeholder, with: marker)
+        if modelSupportsImages {
+            images.append(ImageContent(
+                data: clip.data.base64EncodedString(),
+                mimeType: clip.mimeType
+            ))
+            attachBlocks.append("<image source=\"clipboard\" id=\"\(clip.id)\" mime=\"\(clip.mimeType)\" bytes=\"\(clip.data.count)\" />")
+            counts.image += 1
+        } else {
+            attachBlocks.append("<image source=\"clipboard\" id=\"\(clip.id)\" mime=\"\(clip.mimeType)\" note=\"skipped: this model does not accept image input\" />")
+            counts.skippedImage += 1
+        }
+    }
+
+    // 3. Resolve @path tokens.
+    let resolved = resolveAtTokens(in: expanded, cwd: cwd)
 
     for r in resolved {
         switch r {

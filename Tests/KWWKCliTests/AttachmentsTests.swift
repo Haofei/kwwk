@@ -95,6 +95,23 @@ struct AttachmentStoreTests {
         #expect(store.pastedTexts.isEmpty)
         #expect(store.addPastedText("first-again") == "[pasted-text #1]")
     }
+
+    @MainActor
+    @Test("clipboard images get separate [image #N] placeholders and reset on clear")
+    func clipboardImagesIndependentOfPastedText() {
+        let store = AttachmentStore()
+        _ = store.addPastedText("prose")
+        let imgToken = store.addClipboardImage(
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            mimeType: "image/png"
+        )
+        #expect(imgToken == "[image #1]")
+        #expect(store.clipboardImages.count == 1)
+        let nextImg = store.addClipboardImage(data: Data(), mimeType: "image/png")
+        #expect(nextImg == "[image #2]", "image ids should increment independently of pasted-text ids")
+        store.clear()
+        #expect(store.clipboardImages.isEmpty)
+    }
 }
 
 // MARK: - buildPromptWithAttachments
@@ -203,6 +220,44 @@ struct BuildPromptTests {
         #expect(built.images.count == 1)
         #expect(built.images.first?.mimeType == "image/png")
         #expect(built.summary?.contains("1 image") == true)
+    }
+
+    @MainActor
+    @Test("clipboard-image placeholder expands to a <clipboard-image/> marker and attaches bytes")
+    func clipboardImageExpands() {
+        let store = AttachmentStore()
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A])
+        let token = store.addClipboardImage(data: bytes, mimeType: "image/png")
+        let built = buildPromptWithAttachments(
+            text: "what is this: \(token) any ideas?",
+            store: store,
+            cwd: "/tmp",
+            modelSupportsImages: true
+        )
+        #expect(built.text.contains("<clipboard-image id=\"1\" mime=\"image/png\" />"),
+                "placeholder should turn into a short marker, not stay as [image #1]")
+        #expect(!built.text.contains("[image #1]"))
+        #expect(built.text.contains("<attachments>"))
+        #expect(built.text.contains("source=\"clipboard\""))
+        #expect(built.images.count == 1)
+        #expect(built.images.first?.mimeType == "image/png")
+        #expect(built.summary?.contains("1 image") == true)
+    }
+
+    @MainActor
+    @Test("clipboard-image on a text-only model is skipped with a note")
+    func clipboardImageSkippedOnTextOnly() {
+        let store = AttachmentStore()
+        let token = store.addClipboardImage(data: Data([1, 2, 3]), mimeType: "image/png")
+        let built = buildPromptWithAttachments(
+            text: "\(token)",
+            store: store,
+            cwd: "/tmp",
+            modelSupportsImages: false
+        )
+        #expect(built.images.isEmpty)
+        #expect(built.text.contains("skipped"))
+        #expect(built.summary?.contains("skipped") == true)
     }
 
     @MainActor
