@@ -34,21 +34,29 @@ enum SlashInput: Equatable {
 
 /// Ambient context a slash-command handler receives: the live Agent (for
 /// reading/updating model, messages, etc.), the modal host (to open
-/// selectors), and a hook to append a dimmed line to the transcript so the
-/// command can surface its result to the user.
+/// selectors), the background-task manager + sessionId (so commands like
+/// /compact can preserve running-task context), and a hook to append a
+/// dimmed line to the transcript so the command can surface its result
+/// to the user.
 @MainActor
 final class SlashContext {
     let agent: Agent
     let modal: ModalHost
+    let backgroundManager: BackgroundTaskManager
+    let sessionId: String
     let notify: @MainActor (String) -> Void
 
     init(
         agent: Agent,
         modal: ModalHost,
+        backgroundManager: BackgroundTaskManager,
+        sessionId: String,
         notify: @MainActor @escaping (String) -> Void
     ) {
         self.agent = agent
         self.modal = modal
+        self.backgroundManager = backgroundManager
+        self.sessionId = sessionId
         self.notify = notify
     }
 }

@@ -58,6 +58,17 @@ public actor BackgroundTaskManager {
     private var pendingNotifications: [BackgroundTaskNotification] = []
     private var listeners: [Listener] = []
 
+    /// FIFO of notifications still to be delivered to `listeners`. The
+    /// actor drains this serially so a steering-style listener (e.g. the
+    /// Agent bridge) sees a `stalled` event before a subsequent
+    /// `completed` for the same task. An earlier revision used
+    /// `Task { for listener in listeners { await listener(notif) } }`
+    /// per notification — any suspension in a listener could let later
+    /// notifications overtake, which made completion/stall ordering
+    /// non-deterministic under load.
+    private var deliveryQueue: [BackgroundTaskNotification] = []
+    private var deliveryTask: Task<Void, Never>?
+
     public let outputDir: URL
 
     // Tunables (exposed for tests; clamp reasonable defaults)
@@ -378,12 +389,33 @@ public actor BackgroundTaskManager {
             stalled: stalled
         )
         pendingNotifications.append(notification)
-        let snapshotListeners = listeners
-        Task { [notification] in
-            for listener in snapshotListeners {
-                await listener.handler(notification)
+        deliveryQueue.append(notification)
+        kickDeliveryLoop()
+    }
+
+    /// Start the serial delivery loop if it isn't already running. The
+    /// loop runs on the actor, so it's implicitly single-threaded; we
+    /// only need to guard against spawning a second one while the first
+    /// is still draining.
+    private func kickDeliveryLoop() {
+        guard deliveryTask == nil else { return }
+        deliveryTask = Task { [weak self] in
+            await self?.drainDeliveryQueue()
+        }
+    }
+
+    private func drainDeliveryQueue() async {
+        while !deliveryQueue.isEmpty {
+            let next = deliveryQueue.removeFirst()
+            // Snapshot per-item so a listener added/removed during the
+            // await doesn't retroactively apply to an already-queued
+            // notification.
+            let snapshot = listeners
+            for listener in snapshot {
+                await listener.handler(next)
             }
         }
+        deliveryTask = nil
     }
 
     // MARK: - Hard timeout

@@ -118,6 +118,8 @@ func runCodingTUIInternal(
     let slashContext = SlashContext(
         agent: agent,
         modal: modal,
+        backgroundManager: bgManager,
+        sessionId: sessionId,
         notify: { line in
             notifications.append(line)
             if !modal.isOpen { recomputeTranscript() }
@@ -127,10 +129,16 @@ func runCodingTUIInternal(
 
     // --- keybindings ----------------------------------------------------
 
-    // Enter. Three modes of operation:
+    // Enter. Four modes of operation:
     //   1. modal open → forward to modal's confirm handler.
     //   2. input starts with `/` → slash command dispatch.
-    //   3. anything else → submit as an LLM prompt.
+    //   3. LLM prompt while the agent is idle → submit.
+    //   4. LLM prompt while the agent is streaming → steer as a user
+    //      message so it runs at the next turn boundary. We do NOT
+    //      drop the typed text: starting a second agent.prompt while
+    //      the first is streaming would throw `alreadyRunning` and
+    //      blow the input away. Steering lets the user queue a
+    //      follow-up without racing the current turn.
     runner.bind(.init("enter")) { _ in
         Task { @MainActor in
             if modal.isOpen {
@@ -139,6 +147,22 @@ func runCodingTUIInternal(
             }
             let text = layout.input.value
             guard !text.isEmpty else { return }
+
+            let parsed = SlashInput.parse(text)
+
+            // Slash commands always work, even while streaming, because they
+            // don't call `agent.prompt`. For LLM prompts we check state
+            // first so we can steer instead of clobbering the current turn.
+            if case .prompt = parsed, agent.state.isStreaming {
+                agent.steer(.user(UserMessage(content: [.text(TextContent(text: text))])))
+                layout.input.value = ""
+                notifications.clear()
+                notifications.append(Style.dimmed("  queued — will run after the current turn finishes"))
+                recomputeTranscript()
+                runner.tui.requestRender()
+                return
+            }
+
             layout.input.value = ""
             // Each non-empty Enter starts a fresh action — expire the
             // notifications from the previous one (e.g. stale `/help`
@@ -148,7 +172,7 @@ func runCodingTUIInternal(
             recomputeTranscript()
             runner.tui.requestRender()
 
-            switch SlashInput.parse(text) {
+            switch parsed {
             case .command(let name, let args):
                 if let cmd = slashRegistry.find(name) {
                     await cmd.handler(slashContext, args)

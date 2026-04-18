@@ -27,6 +27,8 @@ struct CompactCommandTests {
         let ctx = SlashContext(
             agent: agent,
             modal: makeStubModalHost(),
+            backgroundManager: BackgroundTaskManager(outputDir: makeTempDir()),
+            sessionId: "test-session",
             notify: { notifier.append($0) }
         )
         let registry = SlashCommandRegistry()
@@ -56,6 +58,8 @@ struct CompactCommandTests {
         let ctx = SlashContext(
             agent: agent,
             modal: makeStubModalHost(),
+            backgroundManager: BackgroundTaskManager(outputDir: makeTempDir()),
+            sessionId: "test-session",
             notify: { notifier.append($0) }
         )
         let registry = SlashCommandRegistry()
@@ -95,6 +99,8 @@ struct CompactCommandTests {
         let ctx = SlashContext(
             agent: agent,
             modal: makeStubModalHost(),
+            backgroundManager: BackgroundTaskManager(outputDir: makeTempDir()),
+            sessionId: "test-session",
             notify: { notifier.append($0) }
         )
         let registry = SlashCommandRegistry()
@@ -127,6 +133,13 @@ private func makeStubModalHost() -> ModalHost {
         restoreTranscript: {},
         requestRender: {}
     )
+}
+
+private func makeTempDir() -> URL {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("kwwk-compact-\(UUID().uuidString.prefix(8))", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
 }
 
 @MainActor

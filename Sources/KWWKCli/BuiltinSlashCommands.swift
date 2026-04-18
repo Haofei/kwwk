@@ -76,7 +76,8 @@ private func handleModelCommand(_ ctx: SlashContext, _ args: String) async {
 /// `ModelsCatalog.byProvider`. They're mostly identical except for Codex:
 /// the chatgpt.com variant registers as `chatgpt-codex` on the agent side,
 /// while the catalog lists its models under `openai-codex`.
-private func catalogProviderKey(forAgentProvider provider: String) -> String {
+/// Internal (not private) so regression tests can pin the mapping.
+func catalogProviderKey(forAgentProvider provider: String) -> String {
     switch provider {
     case "chatgpt-codex": return "openai-codex"
     default: return provider
@@ -91,8 +92,15 @@ private func catalogProviderKey(forAgentProvider provider: String) -> String {
 /// this copy the first request after a switch would hit the wrong
 /// `APIRegistry` entry or try to call the canonical OpenAI endpoint that
 /// we never registered a token for.
-private func adoptFields(from current: Model, into picked: Model) -> Model {
-    Model(
+/// Internal (not private) so regression tests can pin the sentinel logic.
+func adoptFields(from current: Model, into picked: Model) -> Model {
+    // `maxTokens = 0` is a sentinel used by AuthResolver for Codex ("do
+    // not emit max_output_tokens — the endpoint rejects it"). Preserve
+    // the sentinel when switching inside the Codex provider; otherwise
+    // adopt the picked model's real cap so we don't leak an unrelated
+    // model's limit onto the new request.
+    let resolvedMaxTokens = current.maxTokens == 0 ? 0 : picked.maxTokens
+    return Model(
         id: picked.id,
         name: picked.name,
         api: current.api,
@@ -102,7 +110,7 @@ private func adoptFields(from current: Model, into picked: Model) -> Model {
         input: picked.input,
         cost: picked.cost,
         contextWindow: picked.contextWindow,
-        maxTokens: current.maxTokens,
+        maxTokens: resolvedMaxTokens,
         headers: current.headers
     )
 }
@@ -138,23 +146,41 @@ private func handleCompactCommand(_ ctx: SlashContext, _ args: String) async {
 
     ctx.notify(Style.dimmed("  /compact: summarizing \(snapshot.count) messages…"))
 
+    // Capture running background tasks BEFORE summarizing, so even if
+    // one finishes during the LLM call we still carry the state the
+    // current turn was acting against. `runningTasksSummary` returns
+    // "" when nothing is running, and we trim before deciding whether
+    // to append the section.
+    let runningTasks = await ctx.backgroundManager
+        .runningTasksSummary(sessionId: ctx.sessionId)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
     do {
         let summary = try await summarizeTranscript(
             messages: snapshot,
             model: agent.state.model,
             apiKeyResolver: agent.apiKeyResolver
         )
-        let recap = Message.user(UserMessage(content: [
-            .text(TextContent(text:
-                """
-                <previous-session-summary>
-                \(summary)
-                </previous-session-summary>
-                """
-            ))
-        ]))
+        var body = """
+        <previous-session-summary>
+        \(summary)
+        </previous-session-summary>
+        """
+        if !runningTasks.isEmpty {
+            // Inject the running-task ledger so the next turn still
+            // knows the task ids + output file paths that the recap
+            // summarizer may have elided. Completion notifications
+            // will later arrive as separate user messages, so this
+            // only covers the "still running at compact time" gap.
+            body += "\n\n<running-background-tasks>\n\(runningTasks)\n</running-background-tasks>"
+        }
+        let recap = Message.user(UserMessage(content: [.text(TextContent(text: body))]))
         agent.state.messages = [recap]
-        ctx.notify(Style.prompt("  /compact: compacted \(snapshot.count) messages → 1 recap"))
+        var note = "  /compact: compacted \(snapshot.count) messages → 1 recap"
+        if !runningTasks.isEmpty {
+            note += " (+ running-task ledger)"
+        }
+        ctx.notify(Style.prompt(note))
     } catch {
         let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         ctx.notify(Style.error("  /compact: \(msg)"))
