@@ -1,0 +1,156 @@
+import Foundation
+import Testing
+@testable import KWWKAI
+@testable import KWWKAgent
+@testable import KWWKCli
+
+@Suite("/queue command")
+struct QueueCommandTests {
+
+    @MainActor
+    @Test("no args lists queued messages in FIFO order")
+    func listsQueuedMessages() async {
+        let (ctx, notifier) = await makeContext()
+        ctx.agent.steer(.user(UserMessage(text: "first")))
+        ctx.agent.steer(.user(UserMessage(text: "second")))
+
+        await runQueueCommand(ctx: ctx, args: "")
+
+        // Expect: header ("2 waiting…") + 2 entries + hint.
+        #expect(notifier.joined.contains("2 waiting for the next turn"))
+        #expect(notifier.joined.contains("1. first"))
+        #expect(notifier.joined.contains("2. second"))
+        #expect(notifier.joined.contains("/queue clear"))
+        #expect(ctx.agent.queuedSteeringCount() == 2, "listing must not drain the queue")
+    }
+
+    @MainActor
+    @Test("empty queue reports 'nothing queued' for both list and clear")
+    func emptyQueueBehavior() async {
+        let (ctx, notifier) = await makeContext()
+        await runQueueCommand(ctx: ctx, args: "")
+        #expect(notifier.joined.contains("nothing queued"))
+
+        notifier.clear()
+        await runQueueCommand(ctx: ctx, args: "clear")
+        #expect(notifier.joined.contains("nothing queued"))
+    }
+
+    @MainActor
+    @Test("`/queue clear` drops all pending messages")
+    func clearDrains() async {
+        let (ctx, notifier) = await makeContext()
+        ctx.agent.steer(.user(UserMessage(text: "a")))
+        ctx.agent.steer(.user(UserMessage(text: "b")))
+        ctx.agent.steer(.user(UserMessage(text: "c")))
+
+        await runQueueCommand(ctx: ctx, args: "clear")
+
+        #expect(ctx.agent.queuedSteeringCount() == 0)
+        #expect(notifier.joined.contains("cleared 3 queued messages"))
+    }
+
+    @MainActor
+    @Test("`cancel` and `drop` are aliases for clear")
+    func clearAliases() async {
+        for alias in ["cancel", "drop"] {
+            let (ctx, notifier) = await makeContext()
+            ctx.agent.steer(.user(UserMessage(text: "x")))
+            await runQueueCommand(ctx: ctx, args: alias)
+            #expect(ctx.agent.queuedSteeringCount() == 0, "alias \(alias) should drain")
+            #expect(notifier.joined.contains("cleared 1 queued message"))
+        }
+    }
+
+    @MainActor
+    @Test("unknown arg is reported with a hint")
+    func unknownArg() async {
+        let (ctx, notifier) = await makeContext()
+        ctx.agent.steer(.user(UserMessage(text: "stays")))
+        await runQueueCommand(ctx: ctx, args: "rewind")
+        #expect(notifier.joined.contains("unknown arg 'rewind'"))
+        #expect(ctx.agent.queuedSteeringCount() == 1, "malformed arg must not mutate the queue")
+    }
+
+    @MainActor
+    @Test("long queued message previews are truncated in the listing")
+    func longMessagePreview() async {
+        let (ctx, notifier) = await makeContext()
+        let long = String(repeating: "abc ", count: 40)  // ~160 chars
+        ctx.agent.steer(.user(UserMessage(text: long)))
+        await runQueueCommand(ctx: ctx, args: "")
+        // Truncated with a trailing ellipsis so the listing doesn't wrap.
+        #expect(notifier.joined.contains("…"))
+        #expect(!notifier.joined.contains(long), "the full untruncated body shouldn't leak into the UI")
+    }
+}
+
+@Suite("Agent queue introspection")
+struct AgentQueueIntrospectionTests {
+
+    @Test("queuedSteeringCount and snapshot round-trip")
+    func roundTrip() async {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+        let agent = Agent(initialState: AgentInitialState(model: faux.getModel()))
+        #expect(agent.queuedSteeringCount() == 0)
+        #expect(agent.queuedSteeringMessages().isEmpty)
+
+        agent.steer(.user(UserMessage(text: "one")))
+        agent.steer(.user(UserMessage(text: "two")))
+
+        #expect(agent.queuedSteeringCount() == 2)
+        let snapshot = agent.queuedSteeringMessages()
+        #expect(snapshot.count == 2)
+        // Snapshots are read-only copies — draining won't affect the array
+        // we were handed. (The queue does drain during agent.prompt but
+        // we're just pinning the copy-on-read semantics here.)
+        agent.clearSteeringQueue()
+        #expect(agent.queuedSteeringCount() == 0)
+        #expect(snapshot.count == 2, "prior snapshot must not reflect the clear")
+    }
+}
+
+// MARK: - Helpers
+
+@MainActor
+private func makeContext() async -> (SlashContext, NotifyRecorder) {
+    let faux = await registerFauxProvider()
+    // Caller's responsibility to keep using `faux` alive for the test
+    // duration; we leak the registration into the context so it stays
+    // in scope. That's fine: these tests don't care about the faux
+    // side-channel, only that Agent instances can be built.
+    _ = faux
+    let agent = Agent(initialState: AgentInitialState(model: faux.getModel()))
+    let notifier = NotifyRecorder()
+    let outputDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("kwwk-queue-\(UUID().uuidString.prefix(8))")
+    try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+    let ctx = SlashContext(
+        agent: agent,
+        modal: ModalHost(
+            layout: CodingLayout(statusRows: 1),
+            restoreTranscript: {},
+            requestRender: {}
+        ),
+        backgroundManager: BackgroundTaskManager(outputDir: outputDir),
+        sessionId: "sess",
+        notify: { notifier.append($0) }
+    )
+    return (ctx, notifier)
+}
+
+@MainActor
+private func runQueueCommand(ctx: SlashContext, args: String) async {
+    let registry = SlashCommandRegistry()
+    registerBuiltinSlashCommands(registry)
+    await registry.find("queue")?.handler(ctx, args)
+}
+
+@MainActor
+private final class NotifyRecorder {
+    private(set) var lines: [String] = []
+    func append(_ s: String) { lines.append(s) }
+    func clear() { lines.removeAll() }
+    var joined: String { lines.joined(separator: "\n") }
+}

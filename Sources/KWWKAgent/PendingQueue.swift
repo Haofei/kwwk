@@ -25,6 +25,18 @@ final class PendingMessageQueue: @unchecked Sendable {
         lock.withLock { !messages.isEmpty }
     }
 
+    func count() -> Int {
+        lock.withLock { messages.count }
+    }
+
+    /// Read-only snapshot of the queued messages in FIFO order. Used by UI
+    /// layers that want to render a preview (e.g. the status bar's "↓ N
+    /// queued" indicator). Returns an `Array` copy — the underlying queue
+    /// can be drained independently without invalidating the snapshot.
+    func snapshot() -> [Message] {
+        lock.withLock { messages }
+    }
+
     func drain() -> [Message] {
         lock.withLock {
             switch _mode {

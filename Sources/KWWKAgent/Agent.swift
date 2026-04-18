@@ -172,6 +172,15 @@ public final class Agent: @unchecked Sendable {
         steeringQueue.hasItems() || followUpQueue.hasItems()
     }
 
+    /// Number of steering messages waiting to be injected at the next
+    /// turn boundary. Exposed so UI layers can show a "↓ N queued"
+    /// indicator.
+    public func queuedSteeringCount() -> Int { steeringQueue.count() }
+
+    /// Read-only snapshot of the steering queue in FIFO order. Copies the
+    /// underlying array so the caller can iterate without racing a drain.
+    public func queuedSteeringMessages() -> [Message] { steeringQueue.snapshot() }
+
     public var steeringMode: QueueMode {
         get { steeringQueue.mode }
         set { steeringQueue.mode = newValue }

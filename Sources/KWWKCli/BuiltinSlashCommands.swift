@@ -18,6 +18,11 @@ func registerBuiltinSlashCommands(_ registry: SlashCommandRegistry) {
         handler: handleCompactCommand
     ))
     registry.register(SlashCommand(
+        name: "queue",
+        description: "Show or clear the steering-message queue",
+        handler: handleQueueCommand
+    ))
+    registry.register(SlashCommand(
         name: "help",
         description: "List available slash commands",
         handler: { ctx, _ in
@@ -113,6 +118,60 @@ func adoptFields(from current: Model, into picked: Model) -> Model {
         maxTokens: resolvedMaxTokens,
         headers: current.headers
     )
+}
+
+// MARK: - /queue
+
+/// `/queue` (no args) — list any steering messages waiting to be injected
+/// at the next turn boundary. Use `/queue clear` (or `/queue cancel`) to
+/// drop them. Queued messages are created implicitly when the user hits
+/// Enter while the agent is streaming or auto-compacting.
+@MainActor
+private func handleQueueCommand(_ ctx: SlashContext, _ args: String) async {
+    let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    switch trimmed {
+    case "clear", "cancel", "drop":
+        let dropped = ctx.agent.queuedSteeringCount()
+        if dropped == 0 {
+            ctx.notify(Style.dimmed("  /queue: nothing queued"))
+            return
+        }
+        ctx.agent.clearSteeringQueue()
+        ctx.notify(Style.prompt("  /queue: cleared \(dropped) queued \(dropped == 1 ? "message" : "messages")"))
+    case "":
+        let messages = ctx.agent.queuedSteeringMessages()
+        if messages.isEmpty {
+            ctx.notify(Style.dimmed("  /queue: nothing queued"))
+            return
+        }
+        ctx.notify(Style.dimmed("  /queue: \(messages.count) waiting for the next turn boundary"))
+        for (i, msg) in messages.enumerated() {
+            let body = previewQueuedMessage(msg)
+            ctx.notify(Style.dimmed("    \(i + 1). \(body)"))
+        }
+        ctx.notify(Style.dimmed("    (use /queue clear to drop them)"))
+    default:
+        ctx.notify(Style.error("  /queue: unknown arg '\(args)'. Try /queue or /queue clear"))
+    }
+}
+
+/// One-line preview of a queued message for the `/queue` listing.
+/// Truncates long bodies and flattens multi-line text so the listing
+/// stays tidy.
+private func previewQueuedMessage(_ msg: Message, max: Int = 80) -> String {
+    let raw: String = {
+        switch msg {
+        case .user(let u):
+            return u.content.compactMap { block -> String? in
+                if case .text(let t) = block { return t.text }
+                return nil
+            }.joined(separator: " ")
+        default:
+            return "(\(msg.role.rawValue) message)"
+        }
+    }()
+    let flat = raw.replacingOccurrences(of: "\n", with: " ")
+    return flat.count <= max ? flat : String(flat.prefix(max)) + "…"
 }
 
 // MARK: - /compact
