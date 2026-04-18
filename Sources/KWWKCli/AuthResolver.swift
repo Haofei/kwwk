@@ -78,17 +78,24 @@ private func registerCodex(
         originator: "kwwk"
     ))
 
+    // Pull the default model from the bundled catalog (routing fields
+    // overridden for the `chatgpt-codex` provider variant). This keeps
+    // input modalities + contextWindow in sync with the canonical
+    // upstream data — e.g. gpt-5.4 is multimodal `[text, image]`, not
+    // text-only as the initial hardcoded definition claimed.
+    let catalogEntry = ModelsCatalog.model(provider: "openai-codex", id: "gpt-5.4")
     let model = Model(
         id: "gpt-5.4",
-        name: "gpt-5.4",
+        name: catalogEntry?.name ?? "gpt-5.4",
         api: "chatgpt-codex",
         provider: "chatgpt-codex",
         baseUrl: "https://chatgpt.com",
-        reasoning: true,
-        input: [.text],
-        contextWindow: 200_000,
+        reasoning: catalogEntry?.reasoning ?? true,
+        input: catalogEntry?.input ?? [.text, .image],
+        contextWindow: catalogEntry?.contextWindow ?? 272_000,
         // Codex rejects max_output_tokens — setting to 0 skips emitting
-        // the field in the request body.
+        // the field in the request body regardless of what the catalog
+        // reports.
         maxTokens: 0
     )
 
