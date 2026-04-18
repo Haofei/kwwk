@@ -2,101 +2,51 @@
 import PackageDescription
 
 let package = Package(
-    name: "kw",
+    name: "kwwk",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .library(name: "KWAI", targets: ["KWAI"]),
-        .library(name: "KWAgent", targets: ["KWAgent"]),
-        .library(name: "KWCoding", targets: ["KWCoding"]),
-        .library(name: "KWTUI", targets: ["KWTUI"]),
-        .executable(name: "kw-tui-demo", targets: ["kw-tui-demo"]),
-        .executable(name: "kw-chat-demo", targets: ["kw-chat-demo"]),
-        .executable(name: "kw-coding-tui", targets: ["kw-coding-tui"]),
-        .executable(name: "kw-tui-snapshot", targets: ["kw-tui-snapshot"]),
-        .executable(name: "kw-generate-models", targets: ["kw-generate-models"]),
-        .executable(name: "kw-login", targets: ["kw-login"]),
-        .executable(name: "kw-e2e-bg", targets: ["kw-e2e-bg"]),
+        .library(name: "KWWKAI", targets: ["KWWKAI"]),
+        .library(name: "KWWKAgent", targets: ["KWWKAgent"]),
+        .library(name: "KWWKCli", targets: ["KWWKCli"]),
+        .executable(name: "kwwk", targets: ["kwwk"]),
     ],
     targets: [
         .target(
-            name: "KWAI",
-            path: "Sources/KWAI",
+            name: "KWWKAI",
+            path: "Sources/KWWKAI",
             resources: [.process("Resources")]
         ),
         .target(
-            name: "KWAgent",
-            dependencies: ["KWAI"],
-            path: "Sources/KWAgent"
+            name: "KWWKAgent",
+            dependencies: ["KWWKAI"],
+            path: "Sources/KWWKAgent"
         ),
         .target(
-            name: "KWCoding",
-            dependencies: ["KWAI", "KWAgent"],
-            path: "Sources/KWCoding"
-        ),
-        .target(
-            name: "KWTUI",
-            path: "Sources/KWTUI"
-        ),
-        .target(
-            name: "KWCodingTUIKit",
-            dependencies: ["KWAI", "KWAgent", "KWTUI"],
-            path: "Sources/KWCodingTUIKit"
+            name: "KWWKCli",
+            dependencies: ["KWWKAI", "KWWKAgent"],
+            path: "Sources/KWWKCli"
         ),
         .executableTarget(
-            name: "kw-tui-demo",
-            dependencies: ["KWTUI"],
-            path: "Examples/TUIDemo"
-        ),
-        .executableTarget(
-            name: "kw-chat-demo",
-            dependencies: ["KWAI", "KWAgent", "KWTUI"],
-            path: "Examples/ChatDemo"
-        ),
-        .executableTarget(
-            name: "kw-coding-tui",
-            dependencies: ["KWAI", "KWAgent", "KWCoding", "KWTUI", "KWCodingTUIKit"],
-            path: "Examples/CodingTUI"
-        ),
-        .executableTarget(
-            name: "kw-tui-snapshot",
-            dependencies: ["KWAI", "KWAgent", "KWCoding", "KWTUI", "KWCodingTUIKit"],
-            path: "Examples/TUISnapshot"
-        ),
-        .executableTarget(
-            name: "kw-generate-models",
-            path: "Scripts/GenerateModels"
-        ),
-        .executableTarget(
-            name: "kw-login",
-            dependencies: ["KWAI"],
-            path: "Examples/Login"
-        ),
-        .executableTarget(
-            name: "kw-e2e-bg",
-            dependencies: ["KWAI", "KWAgent", "KWCoding"],
-            path: "Examples/BackgroundE2E"
+            name: "kwwk",
+            dependencies: ["KWWKCli"],
+            path: "Sources/kwwk"
         ),
         .testTarget(
-            name: "KWAITests",
-            dependencies: ["KWAI"],
-            path: "Tests/KWAITests"
+            name: "KWWKAITests",
+            dependencies: ["KWWKAI"],
+            path: "Tests/KWWKAITests"
         ),
         .testTarget(
-            name: "KWAgentTests",
-            dependencies: ["KWAgent", "KWAI"],
-            path: "Tests/KWAgentTests"
+            name: "KWWKAgentTests",
+            dependencies: ["KWWKAgent", "KWWKAI"],
+            path: "Tests/KWWKAgentTests"
         ),
         .testTarget(
-            name: "KWCodingTests",
-            dependencies: ["KWCoding", "KWAgent", "KWAI"],
-            path: "Tests/KWCodingTests"
-        ),
-        .testTarget(
-            name: "KWTUITests",
-            dependencies: ["KWTUI"],
-            path: "Tests/KWTUITests"
+            name: "KWWKCliTests",
+            dependencies: ["KWWKCli"],
+            path: "Tests/KWWKCliTests"
         ),
     ],
     swiftLanguageModes: [.v6]
