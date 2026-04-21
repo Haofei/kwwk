@@ -10,8 +10,8 @@ import Foundation
 /// Keyboard map mirrors readline/emacs basics (left/right, home/end,
 /// Ctrl-A/E/B/F/U/K, backspace, delete). Newline-insert triggers:
 ///
+///   - Shift+Enter (Kitty/Ghostty keyboard protocol)
 ///   - Ctrl+Enter  (terminals that send a modifier-tagged Enter)
-///   - Alt+Enter   (ESC + CR — broadly supported)
 ///   - Ctrl+J      (raw LF — 0x0A; always works)
 ///
 /// Plain Enter is left alone so the owning view (CodingTUI) can bind
@@ -234,14 +234,11 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
             case ("k", true, false): chars.removeLast(chars.count - cursor); invalidate()
             // Newline-insert triggers. Ctrl+J is the raw LF byte
             // (0x0A); terminals emit it even without any keyboard
-            // protocol support. Alt+Enter and Ctrl+Enter require
-            // either a terminal that tags Enter with the modifier
-            // (Kitty/Ghostty kbd protocol) or Alt remapping — they're
-            // offered as convenience bindings for users whose
-            // terminal cooperates.
+            // protocol support. Shift+Enter and Ctrl+Enter require
+            // a terminal that tags Enter with modifiers (for example
+            // Kitty/Ghostty keyboard protocol support).
             case ("j", true, false): insert("\n")
             case ("enter", true, false): insert("\n")
-            case ("enter", false, true): insert("\n")
             default: break
             }
             return

@@ -23,12 +23,18 @@ struct KeysTests {
         #expect(Keys.parse("\u{1B}[D")?.name == "left")
     }
 
-    @Test("parses modifier-prefixed arrows") func modifierArrows() {
-        let shiftRight = Keys.parse("\u{1B}[1;2C")
-        #expect(shiftRight?.name == "right")
-        #expect(shiftRight?.shift == true)
-        let ctrlLeft = Keys.parse("\u{1B}[1;5D")
-        #expect(ctrlLeft?.ctrl == true)
+    @Test("parses Kitty CSI-u Ctrl+C") func kittyCtrlC() {
+        let event = Keys.parse("\u{1B}[99;5u")
+        #expect(event?.name == "c")
+        #expect(event?.ctrl == true)
+        #expect(event?.shift == false)
+        #expect(event?.alt == false)
+    }
+
+    @Test("parses Kitty CSI-u Shift+Enter") func kittyShiftEnter() {
+        let event = Keys.parse("\u{1B}[13;2u")
+        #expect(event?.name == "enter")
+        #expect(event?.shift == true)
     }
 
     @Test("parses function keys via tildes") func functionKeys() {

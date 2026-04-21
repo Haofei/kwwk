@@ -64,9 +64,7 @@ enum Keys {
             if bytes.count == 2 {
                 // ESC + single-byte keypress = Alt-modified version of
                 // that key. Translate common control bytes to their
-                // logical names before falling back to the raw char —
-                // so Alt+Enter surfaces as name=="enter" instead of
-                // "\r", Alt+Tab as "tab", etc.
+                // logical names before falling back to the raw char.
                 switch bytes[1] {
                 case 0x0D, 0x0A:
                     return KeyEvent(name: "enter", alt: true, raw: data)
@@ -121,14 +119,11 @@ enum Keys {
         case "u":
             // Kitty keyboard protocol: CSI <keycode> ; <mod> u
             let parts = params.split(separator: ";")
-            if let code = Int(parts.first.map(String.init) ?? "") {
-                switch code {
-                case 13: base = "enter"
-                default: return nil
-                }
-            } else {
+            guard let code = Int(parts.first.map(String.init) ?? "") else {
                 return nil
             }
+            base = kittyKeyName(for: code)
+            if base == nil { return nil }
         case "~":
             base = Keys.tildeKey(params)
         default: base = nil
@@ -146,6 +141,22 @@ enum Keys {
             ctrl = ctrl || (m & 4) != 0
         }
         return KeyEvent(name: name, shift: shift, ctrl: ctrl, alt: alt, raw: raw)
+    }
+
+    private static func kittyKeyName(for code: Int) -> String? {
+        switch code {
+        case 9: return "tab"
+        case 13: return "enter"
+        case 27: return "escape"
+        case 32: return "space"
+        case 127: return "backspace"
+        case 97...122:
+            return String(UnicodeScalar(code)!)
+        case 65...90:
+            return String(UnicodeScalar(code)!).lowercased()
+        default:
+            return nil
+        }
     }
 
     private static func tildeKey(_ params: String) -> String? {

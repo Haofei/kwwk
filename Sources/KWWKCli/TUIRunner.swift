@@ -73,6 +73,11 @@ final class TUIRunner: @unchecked Sendable {
         // again in `tearDown()` so the user's shell isn't left in an
         // unexpected mode after `kwwk` exits.
         terminal.write("\u{1B}[?2004h")
+        // Opt into the Kitty keyboard protocol so modified Enter arrives
+        // as CSI-u (`ESC [ 13 ; <mod> u`). Without this, most terminals
+        // collapse Shift+Enter into plain Enter, which means the input box
+        // can only rely on raw LF / Ctrl+J for newline insertion.
+        terminal.write("\u{1B}[>1u")
         try installStdin()
         await waitForExit()
         tearDown()
@@ -136,6 +141,9 @@ final class TUIRunner: @unchecked Sendable {
         // and the shell prompt sees the 200~/201~ bytes as literal
         // text.
         terminal.write("\u{1B}[?2004l")
+        // Leave Kitty keyboard protocol mode so the parent shell / app
+        // regains its default Enter handling.
+        terminal.write("\u{1B}[<u")
         tui.stop()
         lock.withLock {
             sigintSource?.cancel()
