@@ -7,4 +7,4 @@ DerivedData/
 Package.resolved
 *.xcodeproj
 .vscode/
-.claude/settings.local.json
+.claude/

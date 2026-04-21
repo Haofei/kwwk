@@ -8,7 +8,7 @@ import Testing
 struct AutoCompactUsageTests {
 
     @MainActor
-    @Test("currentUsage sums last assistant's input + output vs contextWindow")
+    @Test("currentUsage sums input + output + cacheRead + cacheWrite")
     func readsLastAssistantUsage() async {
         let faux = await registerFauxProvider()
         defer { faux.unregister() }
@@ -34,6 +34,35 @@ struct AutoCompactUsageTests {
         #expect(usage.tokens == 100_000)
         #expect(usage.window == 200_000)
         #expect(usage.ratio == 0.5)
+    }
+
+    @MainActor
+    @Test("currentUsage includes cached prompt tokens (prompt-caching providers)")
+    func includesCachedTokens() async {
+        // Providers with prompt caching (Anthropic, OpenAI Responses/Codex)
+        // report the cached portion of the prompt under `cacheRead`, not
+        // `input`. The ratio must stay stable regardless of cache-hit
+        // behavior, so the reader has to sum all four components.
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+
+        let assistant = AssistantMessage(
+            content: [.text(TextContent(text: "ok"))],
+            api: faux.getModel().api,
+            provider: faux.getModel().provider,
+            model: faux.getModel().id,
+            // 80K cached prompt + 3K uncached delta + 1K output + 1K new cache write.
+            usage: Usage(input: 3_000, output: 1_000, cacheRead: 80_000, cacheWrite: 1_000, totalTokens: 85_000)
+        )
+        let agent = Agent(initialState: AgentInitialState(
+            model: fauxModelWithWindow(200_000, faux: faux),
+            messages: [
+                .user(UserMessage(text: "hi")),
+                .assistant(assistant),
+            ]
+        ))
+        let controller = makeController(agent: agent, threshold: 0.5)
+        #expect(controller.currentUsage().tokens == 85_000)
     }
 
     @MainActor
@@ -125,6 +154,9 @@ struct AutoCompactGatingTests {
         )
 
         await controller.observe(.agentEnd(messages: messages, summary: AgentRunSummary()))
+        // The compact is deferred onto a detached Task so it runs after
+        // the agent lifecycle unwinds (see observe()). Await that here.
+        await controller.pendingCompactTask?.value
 
         // 165_000 / 200_000 = 0.825 > 0.75 → should compact.
         #expect(agent.state.messages.count == 1, "should have replaced transcript with the recap")

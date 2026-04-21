@@ -9,15 +9,18 @@ import KWWKAgent
 /// referencing them, so we wait until the loop is fully idle.
 ///
 /// Usage math:
-///   tokens  = last assistant `usage.input + usage.output`
+///   tokens  = last assistant `usage.input + output + cacheRead + cacheWrite`
 ///   window  = `agent.state.model.contextWindow`
 ///   ratio   = tokens / window
 ///
-/// `usage.input` already reflects the cumulative transcript the LLM
-/// was shown (system prompt + prior turns). Adding `output` gives
-/// the size the next request's baseline would be before a new user
-/// prompt is appended — the most honest "how full is the window right
-/// now?" read we have without tokenizing ourselves.
+/// All four usage components are summed because providers with prompt
+/// caching (Anthropic, OpenAI Responses/Codex) report only the uncached
+/// portion of the prompt in `input`; the cached portion lives in
+/// `cacheRead` (and any fresh cache writes in `cacheWrite`). Using
+/// `input + output` alone made the percentage bounce between "full
+/// transcript" and "just the new delta" depending on whether the turn
+/// hit the cache. The sum is the honest "how full is the window right
+/// now?" read without tokenizing ourselves.
 @MainActor
 final class AutoCompactController {
 
@@ -47,6 +50,9 @@ final class AutoCompactController {
 
     private(set) var isCompacting: Bool = false
     private(set) var lastUsage: Usage = Usage(tokens: 0, window: 0)
+    /// Handle to the pending deferred compact, if any. Exposed so tests
+    /// can await the detached work before asserting on the transcript.
+    private(set) var pendingCompactTask: Task<Void, Never>?
 
     init(
         agent: Agent,
@@ -76,7 +82,9 @@ final class AutoCompactController {
                 break
             }
         }
-        let tokens = (lastAssistant?.usage.input ?? 0) + (lastAssistant?.usage.output ?? 0)
+        let u = lastAssistant?.usage
+        let tokens = (u?.input ?? 0) + (u?.output ?? 0)
+            + (u?.cacheRead ?? 0) + (u?.cacheWrite ?? 0)
         let window = agent.state.model.contextWindow
         return Usage(tokens: tokens, window: window)
     }
@@ -92,7 +100,17 @@ final class AutoCompactController {
             onUsageChange(usage)
         }
         if case .agentEnd = event {
-            await maybeCompact()
+            // `agentEnd` fires from inside the agent loop while the run
+            // lifecycle is still holding `state.isStreaming == true`;
+            // `performCompact` refuses to run in that state. Detach to a
+            // Task that waits for the lifecycle to fully unwind before
+            // touching the transcript.
+            pendingCompactTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.agent.waitForIdle()
+                await self.maybeCompact()
+                self.pendingCompactTask = nil
+            }
         }
     }
 
