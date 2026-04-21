@@ -22,8 +22,8 @@ enum AuthResolveError: Error, LocalizedError {
             return """
             No credentials configured.
 
-            Run `kwwk login` to pick a provider (OAuth subscriptions or
-            API key), or set ANTHROPIC_API_KEY to use Claude directly.
+            Run `kwwk login` to pick a provider (OAuth subscription or
+            API key).
             """
         case .unsupportedProvider(let id):
             return """
@@ -37,8 +37,7 @@ enum AuthResolveError: Error, LocalizedError {
 /// Resolve credentials:
 ///   1. `OAuthStore` has exactly one provider (kwwk login is exclusive) →
 ///      route based on that provider id.
-///   2. `ANTHROPIC_API_KEY` env var set → legacy Anthropic fallback.
-///   3. Throw `noCredentials`.
+///   2. Throw `noCredentials`.
 ///
 /// Registers the chosen provider on `APIRegistry.shared` as a side effect so
 /// the returned model can be used immediately.
@@ -70,11 +69,6 @@ func resolveAgentAuth() async throws -> ResolvedAuth {
         default:
             throw AuthResolveError.unsupportedProvider(providerId)
         }
-    }
-
-    let env = ProcessInfo.processInfo.environment
-    if let apiKey = env["ANTHROPIC_API_KEY"], !apiKey.isEmpty {
-        return await registerAnthropicFromEnv(apiKey: apiKey, env: env)
     }
 
     throw AuthResolveError.noCredentials
@@ -392,36 +386,6 @@ private func registerOpenAICompatible(creds: OAuthCredentials) async throws -> R
     return ResolvedAuth(
         model: model,
         modelLabel: "\(modelId) · \(baseURL)",
-        apiKeyResolver: nil
-    )
-}
-
-// MARK: - Legacy env-var fallback
-
-private func registerAnthropicFromEnv(
-    apiKey: String,
-    env: [String: String]
-) async -> ResolvedAuth {
-    let modelId = env["ANTHROPIC_MODEL"] ?? "claude-sonnet-4-5-20250929"
-    let baseURL = env["ANTHROPIC_BASE_URL"] ?? "https://api.anthropic.com"
-
-    await APIRegistry.shared.register(AnthropicProvider(defaultAPIKey: apiKey))
-
-    let model = Model(
-        id: modelId,
-        name: modelId,
-        api: "anthropic-messages",
-        provider: "anthropic",
-        baseUrl: baseURL,
-        reasoning: false,
-        input: [.text, .image],
-        contextWindow: 200_000,
-        maxTokens: 8192
-    )
-
-    return ResolvedAuth(
-        model: model,
-        modelLabel: modelId,
         apiKeyResolver: nil
     )
 }

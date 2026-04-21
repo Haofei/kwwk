@@ -3,8 +3,8 @@ import KWWKCli
 
 /// `kwwk` — coding-agent CLI. Dispatches on argv:
 ///
-///   kwwk           → interactive coding TUI (auto-detects Codex / Anthropic creds)
-///   kwwk login     → TUI-driven OAuth login
+///   kwwk           → interactive coding TUI (uses creds from `kwwk login`)
+///   kwwk login     → TUI-driven OAuth / API-key login
 ///   kwwk --help    → usage
 @main
 struct KwwkCLI {
@@ -35,11 +35,9 @@ struct KwwkCLI {
           kwwk login        log in to an OAuth provider
           kwwk --help       show this message
 
-        Credentials are resolved in this order on launch:
-          1. OAuth store (~/.kw/oauth.json) has openai-codex  → ChatGPT Codex
-          2. ANTHROPIC_API_KEY env var is set                 → Anthropic
-
-        Run `kwwk login` once to register your ChatGPT subscription.
+        Credentials are read from the OAuth store at ~/.kw/oauth.json.
+        Run `kwwk login` once to register a provider (OAuth subscription
+        or API key).
         """)
     }
 

@@ -32,13 +32,10 @@ kwwk login        log in to an OAuth provider
 kwwk --help       show this message
 ```
 
-Credentials are resolved on launch in this order:
-
-1. OAuth store (`~/.kw/oauth.json`) — ChatGPT Codex, Gemini, Copilot, or
-   Claude Code subscription
-2. `ANTHROPIC_API_KEY` env var → Anthropic
-
-Run `kwwk login` once to register a subscription.
+Credentials come from the OAuth store at `~/.kw/oauth.json` — run
+`kwwk login` once to register a provider (OAuth subscription like
+ChatGPT Codex, Gemini, Copilot, or Claude Code; or an API key for
+Anthropic, OpenAI, Google, or any OpenAI-compatible endpoint).
 
 Inside the TUI, `/help` lists slash commands (`/model`, `/thinking`,
 `/clear`, …). The agent ships with Bash, Read, Write, Edit, Grep, Find,

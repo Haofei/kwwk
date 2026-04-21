@@ -8,11 +8,9 @@ public enum KWWK {
     /// Launch the interactive coding-agent TUI in `cwd` (defaults to the
     /// current working directory).
     ///
-    /// Credentials are resolved automatically, in priority order:
-    ///   1. OAuth store contains `openai-codex` → ChatGPT Codex (gpt-5.4).
-    ///   2. `ANTHROPIC_API_KEY` env var is set → Anthropic Claude.
-    ///   3. Throw `AuthResolveError.noCredentials` with a message pointing
-    ///      at `kwwk login`.
+    /// Credentials are resolved automatically from the OAuth store
+    /// (`~/.kw/oauth.json`). Throws `AuthResolveError.noCredentials`
+    /// with a message pointing at `kwwk login` if none are configured.
     ///
     /// `tools` controls which coding tools the agent is given. Default is
     /// `.all` — read/write/edit/bash/grep/find/ls/task_status/wait_task +
