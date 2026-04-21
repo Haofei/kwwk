@@ -32,7 +32,8 @@ public func createFindTool(cwd: String, options: FindToolOptions = .init()) -> A
         label: "find",
         description: "Find files matching a glob pattern.",
         parameters: parameters,
-        execute: { _, args, _, _ in
+        execute: { _, args, cancellation, _ in
+            try cancellation?.throwIfCancelled()
             guard case .object(let obj) = args,
                   case .string(let pattern) = obj["pattern"] ?? .null else {
                 throw CodingToolError.invalidArgument("find: `pattern` is required")

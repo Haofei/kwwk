@@ -135,7 +135,9 @@ private func makeContext() async -> (SlashContext, NotifyRecorder) {
         ),
         backgroundManager: BackgroundTaskManager(outputDir: outputDir),
         sessionId: "sess",
-        notify: { notifier.append($0) }
+        notifyBlock: { lines in for l in lines { notifier.append(l) } },
+        commitScrollback: { _ in },
+        refreshTranscript: {}
     )
     return (ctx, notifier)
 }

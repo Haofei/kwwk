@@ -3,7 +3,9 @@ import Foundation
 public enum Truncate {
     public static let defaultMaxLines = 2000
     public static let defaultMaxBytes = 50 * 1024
-    public static let grepMaxLineLength = 500
+    public static let grepMaxLineLength = 300
+    public static let grepMaxTotalBytes = 30 * 1024
+    public static let grepDefaultLimit = 50
 
     public struct Result: Sendable {
         public var content: String

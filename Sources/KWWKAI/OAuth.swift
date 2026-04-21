@@ -88,7 +88,13 @@ public actor OAuthStore {
         if let url {
             self.url = url
         } else {
-            let home = FileManager.default.homeDirectoryForCurrentUser
+            let home: URL = {
+                #if targetEnvironment(macCatalyst) || os(iOS)
+                return URL(fileURLWithPath: NSHomeDirectory())
+                #else
+                return FileManager.default.homeDirectoryForCurrentUser
+                #endif
+            }()
             self.url = home.appendingPathComponent(".kw").appendingPathComponent("oauth.json")
         }
         if let data = try? Data(contentsOf: self.url),
@@ -104,6 +110,14 @@ public actor OAuthStore {
 
     public func set(_ credentials: OAuthCredentials, for providerId: String) throws {
         self.credentials[providerId] = credentials
+        try persist()
+    }
+
+    /// Replace the entire store with a single provider's credentials. Used by
+    /// `kwwk login` to enforce a single active provider — logging in with a
+    /// new provider drops any previously-saved ones in one atomic write.
+    public func setExclusive(_ credentials: OAuthCredentials, for providerId: String) throws {
+        self.credentials = [providerId: credentials]
         try persist()
     }
 

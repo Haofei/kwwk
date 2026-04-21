@@ -53,7 +53,8 @@ public func createLSTool(cwd: String, options: LSToolOptions = .init()) -> Agent
         label: "ls",
         description: "List the contents of a directory.",
         parameters: parameters,
-        execute: { _, args, _, _ in
+        execute: { _, args, cancellation, _ in
+            try cancellation?.throwIfCancelled()
             let path: String = {
                 if case .object(let obj) = args, case .string(let p) = obj["path"] ?? .null {
                     return PathUtils.resolveToCwd(p, cwd: cwd)

@@ -3,24 +3,35 @@ import Foundation
 /// Retained-mode TUI runtime. Two render strategies:
 ///
 /// - `.inline` (default, matches Claude Code's behavior): anchor at the
-///   current cursor position, grow downward. On first render we simply write
-///   our frame at the cursor — if there isn't enough room, the terminal
-///   scrolls the shell's previous output up into scrollback, exactly like a
-///   normal program's output. Subsequent renders move back up N-1 rows,
-///   rewrite lines in place, and clear any trailing rows from the previous
-///   frame.
+///   current cursor position, grow downward. Children form the **live zone**,
+///   which is redrawn in place on every render. A separate `commit(_:)`
+///   API writes lines ABOVE the live zone as append-only output — those
+///   lines flow into the terminal's native scrollback exactly like
+///   ordinary stdout, so users can scroll up to see history. Subsequent
+///   renders move back up `liveHeight - 1` rows, rewrite the live zone,
+///   and clear any trailing rows. Committed content is NOT repainted,
+///   which means it can't be re-wrapped on resize — same constraint Ink
+///   has with its `<Static>` component.
 ///
 /// - `.alternate`: enter the alternate screen buffer on start and restore the
 ///   original screen on stop. For full-screen apps that don't care about
-///   preserving scrollback.
+///   preserving scrollback. `commit(_:)` is a no-op in this mode (there's no
+///   scrollback to write into).
 final class TUI: @unchecked Sendable {
     enum RenderMode: Sendable { case inline, alternate }
 
     private let terminal: Terminal
     private let lock = NSLock()
+    /// Live-zone children. Everything in here is redrawn in place on every
+    /// render cycle. Static/committed content is written via `commit(_:)`
+    /// and never tracked as a component — it scrolls into native scrollback
+    /// and is owned by the terminal from that point on.
     private var children: [Component] = []
     private var lastFrameHeight: Int = 0
     private var lastRenderedLines: [String] = []
+    /// Lines queued up to be written as append-only output above the live
+    /// zone on the next render. Drained (→ []) every time we flush.
+    private var pendingCommits: [String] = []
     private var isStarted: Bool = false
     private var clearOnShrink: Bool = true
     private var resizeUnsubscribe: (() -> Void)?
@@ -106,6 +117,21 @@ final class TUI: @unchecked Sendable {
         render(forceFullRedraw: false)
     }
 
+    /// Queue `lines` to be written as append-only output above the live
+    /// zone on the next render. Each line becomes one terminal row; they
+    /// scroll into native scrollback as the live zone below pushes them
+    /// up, exactly like normal stdout output would.
+    ///
+    /// In `.alternate` mode there's no scrollback to target, so this is
+    /// a no-op. Callers that want to display the same content in both
+    /// modes should also put it somewhere in the live child tree.
+    func commit(_ lines: [String]) {
+        guard !lines.isEmpty else { return }
+        lock.withLock {
+            pendingCommits.append(contentsOf: lines)
+        }
+    }
+
     func setClearOnShrink(_ value: Bool) {
         lock.withLock { clearOnShrink = value }
     }
@@ -124,22 +150,25 @@ final class TUI: @unchecked Sendable {
         let snapshotChildren: [Component]
         let width: Int
         let termHeight: Int
-        let oldLines: [String]
         let oldHeight: Int
         let mode: RenderMode
         let clearOnShrinkEnabled: Bool
+        let committed: [String]
 
         lock.lock()
         snapshotChildren = children
         width = terminal.width
         termHeight = terminal.height
-        oldLines = lastRenderedLines
         oldHeight = lastFrameHeight
         mode = renderMode
         clearOnShrinkEnabled = clearOnShrink
+        committed = pendingCommits
+        pendingCommits.removeAll()
         lock.unlock()
 
-        // Collect rendered lines from children, cap to terminal height.
+        // Collect rendered lines from children (the live zone). Cap to
+        // terminal height; there's no point trying to show more live rows
+        // than the terminal has.
         var rendered: [String] = []
         for child in snapshotChildren {
             rendered.append(contentsOf: child.render(width: width))
@@ -159,6 +188,9 @@ final class TUI: @unchecked Sendable {
 
         switch mode {
         case .alternate:
+            // Alternate screen has no scrollback — committed output has
+            // nowhere to go. Drop it; callers that want content in both
+            // modes should keep it in the live tree too.
             terminal.write(renderAlternate(
                 rendered: rendered,
                 oldHeight: oldHeight,
@@ -169,6 +201,7 @@ final class TUI: @unchecked Sendable {
             terminal.write(renderInline(
                 rendered: rendered,
                 oldHeight: oldHeight,
+                committed: committed,
                 forceFullRedraw: forceFullRedraw
             ))
         }
@@ -209,47 +242,69 @@ final class TUI: @unchecked Sendable {
     // Anchors at the cursor position of the first render. Subsequent renders
     // move up (oldHeight - 1) rows, rewrite, and clear any trailing rows.
     // Cursor never steps above the anchor — shell scrollback above is safe.
+    //
+    // Committed lines (the append-only output above the live zone) are
+    // emitted between "clear old live" and "draw new live": they occupy the
+    // rows that used to hold the top of the live zone, and the live zone
+    // gets pushed down below them. If the combined output overflows the
+    // terminal's bottom row, the terminal naturally scrolls the oldest row
+    // into scrollback — which is exactly what we want for committed output
+    // to persist as viewable history.
 
     private func renderInline(
         rendered: [String],
         oldHeight: Int,
+        committed: [String],
         forceFullRedraw: Bool
     ) -> String {
         var out = ""
 
-        // If we've rendered before, wind the cursor back to the frame top and
-        // clear the existing frame. That way we don't have to reason about
-        // diffing old and new line by line — simpler than pi-tui's approach,
-        // but correct, and fast enough at interactive rates.
+        // Step 1: rewind to the top of the previous live zone.
         if oldHeight > 0 {
             out += "\r"
             if oldHeight > 1 {
                 out += "\u{1B}[\(oldHeight - 1)A"
             }
+            // Clear oldHeight rows in place so leftover content doesn't
+            // bleed through when the new frame is shorter than the old.
             for i in 0..<oldHeight {
                 out += "\u{1B}[2K"
                 if i < oldHeight - 1 { out += "\r\n" }
             }
-            // Cursor is now at column 0 of the last cleared row. Move back up
-            // to the top row of the region so we can redraw there.
+            // Back to the top of the cleared area.
             out += "\r"
             if oldHeight > 1 {
                 out += "\u{1B}[\(oldHeight - 1)A"
             }
         }
 
-        // Draw new frame. `\r\n` between rows; no trailing `\r\n` so the
-        // cursor lands at the end of the last line.
+        // Step 2: emit committed lines as permanent output. Each line
+        // ends in \r\n so the cursor advances to a fresh row afterwards.
+        // If the total committed + live output is taller than what fits
+        // below the current cursor, the terminal's built-in scroll
+        // behavior kicks in — rows at the top slide up into scrollback,
+        // which is the whole point of this path.
+        for line in committed {
+            out += "\u{1B}[2K"   // clear any stale cell content on this row
+            out += line
+            out += "\r\n"
+        }
+
+        // Step 3: draw the live frame. `\r\n` between rows; no trailing
+        // `\r\n` so the cursor lands at the end of the last line, where
+        // we may further position it for the focused component.
         var cursorTarget: (rowFromTop: Int, col: Int)?
         for (i, rawLine) in rendered.enumerated() {
             let (cleanLine, col) = TUI.extractCursor(rawLine)
             if let col, cursorTarget == nil { cursorTarget = (i, col) }
+            out += "\u{1B}[2K"
             out += cleanLine
             if i < rendered.count - 1 { out += "\r\n" }
         }
 
-        // Reposition the hardware cursor to wherever the focused component
-        // asked. Cursor is currently at (bottom_row, visibleWidth(lastLine)).
+        // Step 4: reposition the hardware cursor to wherever the focused
+        // component asked. Cursor is currently at (bottom_row,
+        // visibleWidth(lastLine)) of the live zone.
         if let target = cursorTarget {
             let upBy = (rendered.count - 1) - target.rowFromTop
             if upBy > 0 { out += "\u{1B}[\(upBy)A" }

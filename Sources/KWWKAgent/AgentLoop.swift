@@ -12,11 +12,19 @@ public struct AgentLoopConfig: Sendable {
     public var toolExecution: ToolExecutionMode
     public var toolChoice: ToolChoice?
     public var parallelToolCalls: Bool?
+    // Hard ceiling on assistant turns per run. Mirrors the SDK's
+    // `max_turns` — prevents runaway tool-loops from burning budget.
+    // Nil = unlimited.
+    public var maxTurns: Int?
+    // Base delay for exponential backoff between stream retries. Prod
+    // defaults to 1_000 ms; tests override to something small.
+    public var retryBaseDelayMs: UInt64
     public var getSteeringMessages: @Sendable () async -> [Message]
     public var getFollowUpMessages: @Sendable () async -> [Message]
     public var apiKeyResolver: (@Sendable (String) async -> String?)?
     public var beforeToolCall: BeforeToolCallHook?
     public var afterToolCall: AfterToolCallHook?
+    public var userPromptSubmit: UserPromptSubmitHook?
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
 
@@ -29,11 +37,14 @@ public struct AgentLoopConfig: Sendable {
         toolExecution: ToolExecutionMode = .parallel,
         toolChoice: ToolChoice? = nil,
         parallelToolCalls: Bool? = nil,
+        maxTurns: Int? = nil,
+        retryBaseDelayMs: UInt64 = 1_000,
         getSteeringMessages: @escaping @Sendable () async -> [Message] = { [] },
         getFollowUpMessages: @escaping @Sendable () async -> [Message] = { [] },
         apiKeyResolver: (@Sendable (String) async -> String?)? = nil,
         beforeToolCall: BeforeToolCallHook? = nil,
         afterToolCall: AfterToolCallHook? = nil,
+        userPromptSubmit: UserPromptSubmitHook? = nil,
         convertToLlm: ConvertToLlmHook? = nil,
         transformContext: TransformContextHook? = nil
     ) {
@@ -45,11 +56,14 @@ public struct AgentLoopConfig: Sendable {
         self.toolExecution = toolExecution
         self.toolChoice = toolChoice
         self.parallelToolCalls = parallelToolCalls
+        self.maxTurns = maxTurns
+        self.retryBaseDelayMs = retryBaseDelayMs
         self.getSteeringMessages = getSteeringMessages
         self.getFollowUpMessages = getFollowUpMessages
         self.apiKeyResolver = apiKeyResolver
         self.beforeToolCall = beforeToolCall
         self.afterToolCall = afterToolCall
+        self.userPromptSubmit = userPromptSubmit
         self.convertToLlm = convertToLlm
         self.transformContext = transformContext
     }
@@ -85,11 +99,30 @@ public enum AgentLoop {
         streamFn: @escaping StreamFn
     ) async throws {
         var currentContext = context
-        currentContext.messages.append(contentsOf: prompts)
+        // Run every user prompt through the UserPromptSubmit hook
+        // before it enters context. Blocked messages are silently
+        // dropped; modified replacements take the original's place
+        // so downstream emit/append sees the sanitized version.
+        var effectivePrompts: [Message] = []
+        for prompt in prompts {
+            if case .user(let u) = prompt {
+                if let kept = await applyUserPromptSubmitHook(
+                    message: u,
+                    context: currentContext,
+                    config: config,
+                    cancellation: cancellation
+                ) {
+                    effectivePrompts.append(.user(kept))
+                }
+            } else {
+                effectivePrompts.append(prompt)
+            }
+        }
+        currentContext.messages.append(contentsOf: effectivePrompts)
 
         await emit(.agentStart)
         await emit(.turnStart)
-        for prompt in prompts {
+        for prompt in effectivePrompts {
             await emit(.messageStart(message: prompt))
             await emit(.messageEnd(message: prompt))
         }
@@ -102,6 +135,22 @@ public enum AgentLoop {
             emit: emit,
             streamFn: streamFn
         )
+    }
+
+    /// Apply the user-prompt-submit hook. Returns nil if the hook
+    /// blocked the message, otherwise the (possibly modified) message
+    /// to append to the transcript.
+    private static func applyUserPromptSubmitHook(
+        message: UserMessage,
+        context: AgentContext,
+        config: AgentLoopConfig,
+        cancellation: CancellationHandle?
+    ) async -> UserMessage? {
+        guard let hook = config.userPromptSubmit else { return message }
+        let ctx = UserPromptSubmitContext(message: message, context: context)
+        guard let result = await hook(ctx, cancellation) else { return message }
+        if result.block { return nil }
+        return result.modifiedMessage ?? message
     }
 
     /// Continue an existing transcript. Mirrors `runAgentLoopContinue`.
@@ -156,8 +205,37 @@ public enum AgentLoop {
             Array(currentContext.messages[baseCount...])
         }
 
+        // Run-level telemetry accumulated into `AgentRunSummary` and
+        // emitted on `agentEnd`. Usage fields are additive across every
+        // assistant turn; `finalStopReason` tracks the last turn's
+        // reason so consumers can branch on "stopped normally" vs
+        // "errored out". The start timestamp is captured in ms so we
+        // can report wall-clock duration without keeping a Date around.
+        let runStartMs = Timestamp.now()
+        var summary = AgentRunSummary()
+        func finalize(_ reason: StopReason?) -> AgentRunSummary {
+            var s = summary
+            s.durationMs = Int(Timestamp.now() - runStartMs)
+            s.finalStopReason = reason ?? s.finalStopReason
+            s.cost = calculateCost(model: config.model, usage: s.usage)
+            return s
+        }
+        func accumulate(_ assistant: AssistantMessage) {
+            summary.turns += 1
+            summary.usage.input += assistant.usage.input
+            summary.usage.output += assistant.usage.output
+            summary.usage.cacheRead += assistant.usage.cacheRead
+            summary.usage.cacheWrite += assistant.usage.cacheWrite
+            summary.usage.totalTokens += assistant.usage.totalTokens
+            summary.finalStopReason = assistant.stopReason
+        }
+
         var firstTurn = initialFirstTurn
         var pendingMessages = await config.getSteeringMessages()
+        // Count assistant turns actually executed (post-stream). Checked
+        // against `config.maxTurns` right before each streaming call so
+        // the cap applies to what the API *would* see, not the loop head.
+        var turnsExecuted = 0
 
         outer: while true {
             var hasMoreToolCalls = true
@@ -171,11 +249,53 @@ public enum AgentLoop {
 
                 if !pendingMessages.isEmpty {
                     for message in pendingMessages {
-                        await emit(.messageStart(message: message))
-                        await emit(.messageEnd(message: message))
-                        currentContext.messages.append(message)
+                        // Route user messages through the submit hook
+                        // the same way `run()` does for initial prompts,
+                        // so steering / follow-up injections get the
+                        // same redaction / block semantics.
+                        if case .user(let u) = message {
+                            guard let kept = await applyUserPromptSubmitHook(
+                                message: u,
+                                context: currentContext,
+                                config: config,
+                                cancellation: cancellation
+                            ) else { continue }
+                            let msg = Message.user(kept)
+                            await emit(.messageStart(message: msg))
+                            await emit(.messageEnd(message: msg))
+                            currentContext.messages.append(msg)
+                        } else {
+                            await emit(.messageStart(message: message))
+                            await emit(.messageEnd(message: message))
+                            currentContext.messages.append(message)
+                        }
                     }
                     pendingMessages = []
+                }
+
+                if let cap = config.maxTurns, turnsExecuted >= cap {
+                    // Synthesize an error assistant message so the
+                    // transcript surfaces a clear "turn cap reached"
+                    // line instead of silently returning.
+                    let capped = AssistantMessage(
+                        content: [],
+                        api: config.model.api,
+                        provider: config.model.provider,
+                        model: config.model.id,
+                        stopReason: .error,
+                        errorMessage: "Maximum turn limit (\(cap)) reached",
+                        timestamp: Timestamp.now()
+                    )
+                    // The capped message is synthetic — it never hit
+                    // the provider, so don't bump `turns` or usage.
+                    // Just record the stop reason for the summary.
+                    summary.finalStopReason = .error
+                    await emit(.messageStart(message: .assistant(capped)))
+                    await emit(.messageEnd(message: .assistant(capped)))
+                    currentContext.messages.append(.assistant(capped))
+                    await emit(.turnEnd(message: .assistant(capped), toolResults: []))
+                    await emit(.agentEnd(messages: delta(), summary: finalize(.error)))
+                    return
                 }
 
                 let assistant = try await streamAssistantResponse(
@@ -192,10 +312,12 @@ public enum AgentLoop {
                 // Providers like OpenAI Responses and Anthropic Messages
                 // enforce that ordering.
                 currentContext.messages.append(.assistant(assistant))
+                turnsExecuted += 1
+                accumulate(assistant)
 
                 if assistant.stopReason == .error || assistant.stopReason == .aborted {
                     await emit(.turnEnd(message: .assistant(assistant), toolResults: []))
-                    await emit(.agentEnd(messages: delta()))
+                    await emit(.agentEnd(messages: delta(), summary: finalize(nil)))
                     return
                 }
 
@@ -235,13 +357,14 @@ public enum AgentLoop {
                         errorMessage: "Request was aborted",
                         timestamp: Timestamp.now()
                     )
+                    summary.finalStopReason = .aborted
                     await emit(.messageStart(message: .assistant(aborted)))
                     await emit(.messageEnd(message: .assistant(aborted)))
                     // `aborted` is not appended to currentContext — preserving
                     // the prior behavior where the synthetic abort message is
                     // surfaced via messageEnd but not part of the agent-end
                     // delta or the transcript.
-                    await emit(.agentEnd(messages: delta()))
+                    await emit(.agentEnd(messages: delta(), summary: finalize(.aborted)))
                     return
                 }
 
@@ -256,10 +379,29 @@ public enum AgentLoop {
             break
         }
 
-        await emit(.agentEnd(messages: delta()))
+        await emit(.agentEnd(messages: delta(), summary: finalize(nil)))
     }
 
     // MARK: - Stream assistant response
+
+    private static let maxRetries = 5
+
+    private static func isRetryableError(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("timeout")
+            || lower.contains("network")
+            || lower.contains("connection")
+            || lower.contains("429")
+            || lower.contains("rate limit")
+            || lower.contains("too many requests")
+            || lower.contains("502")
+            || lower.contains("503")
+            || lower.contains("504")
+            || lower.contains("internal server error")
+            || lower.contains("service unavailable")
+            || lower.contains("bad gateway")
+            || lower.contains("gateway timeout")
+    }
 
     private static func streamAssistantResponse(
         context: inout AgentContext,
@@ -294,48 +436,105 @@ public enum AgentLoop {
             parallelToolCalls: config.parallelToolCalls
         )
 
-        let response = try await streamFn(config.model, llmContext, options)
+        var lastError: Error?
 
-        var emittedStart = false
+        for attempt in 0..<maxRetries {
+            if cancellation?.isCancelled == true {
+                throw AgentError.aborted
+            }
 
-        for await event in response {
-            switch event {
-            case .start(let partial):
-                await emit(.messageStart(message: .assistant(partial)))
-                await emit(.messageUpdate(message: partial, assistantMessageEvent: event))
-                emittedStart = true
+            do {
+                let response = try await streamFn(config.model, llmContext, options)
 
-            case .textStart(_, let partial),
-                 .textDelta(_, _, let partial),
-                 .textEnd(_, _, let partial),
-                 .thinkingStart(_, let partial),
-                 .thinkingDelta(_, _, let partial),
-                 .thinkingEnd(_, _, let partial),
-                 .toolCallStart(_, let partial),
-                 .toolCallDelta(_, _, let partial),
-                 .toolCallEnd(_, _, let partial):
-                if !emittedStart {
-                    await emit(.messageStart(message: .assistant(partial)))
-                    emittedStart = true
+                // Live-stream events as they arrive so the UI shows tokens
+                // in real time. A retryable mid-stream error emits
+                // `streamRewind` below, which the UI treats as "discard
+                // whatever partial you rendered for this turn"; the retry
+                // then produces a fresh `messageStart` and updates. Older
+                // code buffered everything until the stream ended — it
+                // avoided retry-rendered-text ghosts but killed visible
+                // streaming entirely.
+                var emittedStart = false
+                for await event in response {
+                    switch event {
+                    case .start(let partial):
+                        if !emittedStart {
+                            await emit(.messageStart(message: .assistant(partial)))
+                            emittedStart = true
+                        }
+                        await emit(.messageUpdate(message: partial, assistantMessageEvent: event))
+
+                    case .textStart(_, let partial),
+                         .textDelta(_, _, let partial),
+                         .textEnd(_, _, let partial),
+                         .thinkingStart(_, let partial),
+                         .thinkingDelta(_, _, let partial),
+                         .thinkingEnd(_, _, let partial),
+                         .toolCallStart(_, let partial),
+                         .toolCallDelta(_, _, let partial),
+                         .toolCallEnd(_, _, let partial):
+                        if !emittedStart {
+                            await emit(.messageStart(message: .assistant(partial)))
+                            emittedStart = true
+                        }
+                        await emit(.messageUpdate(message: partial, assistantMessageEvent: event))
+
+                    case .done, .error:
+                        // Final settlement is handled after the loop via
+                        // `response.result()`. These marker events carry no
+                        // additional partial we haven't already shown.
+                        break
+                    }
                 }
-                await emit(.messageUpdate(message: partial, assistantMessageEvent: event))
-
-            case .done, .error:
                 let final = await response.result()
+
+                // Retry on stream-level errors that look transient. Ask the
+                // UI to drop the partial render first so the retried stream
+                // doesn't paint over a corrupted frame.
+                if final.stopReason == .error,
+                   let msg = final.errorMessage,
+                   isRetryableError(msg),
+                   attempt < maxRetries - 1 {
+                    if emittedStart {
+                        await emit(.streamRewind)
+                    }
+                    let delayMs = min(config.retryBaseDelayMs * (1 << attempt), 30_000)
+                    await emit(.streamRetry(attempt: attempt, delayMs: delayMs, reason: msg))
+                    // Sleep in 100ms increments so an Esc press (abort)
+                    // cuts through the backoff instead of waiting out the
+                    // full 30s exponential cap.
+                    let tickMs: UInt64 = 100
+                    var remainingMs = delayMs
+                    while remainingMs > 0 {
+                        if cancellation?.isCancelled == true { throw AgentError.aborted }
+                        let step = min(remainingMs, tickMs)
+                        try? await Task.sleep(nanoseconds: step * 1_000_000)
+                        remainingMs -= step
+                    }
+                    lastError = AgentError.maxRetriesExceeded
+                    continue
+                }
+
                 if !emittedStart {
                     await emit(.messageStart(message: .assistant(final)))
                 }
                 await emit(.messageEnd(message: .assistant(final)))
                 return final
+
+            } catch {
+                lastError = error
+                let reason = "\(error)"
+                if isRetryableError(reason), attempt < maxRetries - 1 {
+                    let delayMs = min(config.retryBaseDelayMs * (1 << attempt), 30_000)
+                    await emit(.streamRetry(attempt: attempt, delayMs: delayMs, reason: reason))
+                    try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+                    continue
+                }
+                throw error
             }
         }
 
-        let final = await response.result()
-        if !emittedStart {
-            await emit(.messageStart(message: .assistant(final)))
-        }
-        await emit(.messageEnd(message: .assistant(final)))
-        return final
+        throw lastError ?? AgentError.maxRetriesExceeded
     }
 
     // MARK: - Tool execution
@@ -530,6 +729,7 @@ public enum AgentLoop {
             return .immediate(errorToolResult(msg), true)
         }
 
+        var effectiveArgs = args
         if let before = config.beforeToolCall {
             let ctx = BeforeToolCallContext(
                 assistantMessage: assistantMessage,
@@ -537,14 +737,25 @@ public enum AgentLoop {
                 args: args,
                 context: context
             )
-            if let result = await before(ctx, cancellation), result.block {
-                return .immediate(
-                    errorToolResult(result.reason ?? "Tool execution was blocked"),
-                    true
-                )
+            if let result = await before(ctx, cancellation) {
+                if result.block {
+                    return .immediate(
+                        errorToolResult(result.reason ?? "Tool execution was blocked"),
+                        true
+                    )
+                }
+                // Hook rewrote the input — propagate the new args into
+                // execution and finalize so the tool body + after-hook
+                // see the sanitized version. `toolExecutionStart` has
+                // already fired with the LLM's original args (callers
+                // who care about the diff can read `args` on the after-
+                // hook context or the toolExecutionEnd event).
+                if let rewritten = result.modifiedArgs {
+                    effectiveArgs = rewritten
+                }
             }
         }
-        return .prepared(PreparedToolCall(call: toolCall, tool: tool, args: args))
+        return .prepared(PreparedToolCall(call: toolCall, tool: tool, args: effectiveArgs))
     }
 
     private static func executePrepared(
@@ -568,7 +779,12 @@ public enum AgentLoop {
             return ExecutedOutcome(result: result, isError: false)
         } catch {
             await emitBox.waitForPending()
-            let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            let message: String
+            if error is CancellationError || (error as? CodingToolError) == .aborted {
+                message = "aborted by user"
+            } else {
+                message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            }
             return ExecutedOutcome(result: errorToolResult(message), isError: true)
         }
     }

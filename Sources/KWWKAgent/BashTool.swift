@@ -1,6 +1,8 @@
 import Foundation
 import KWWKAI
 
+#if os(macOS)
+
 public struct BashToolOptions: Sendable {
     /// Legacy pipe-based executor used when `manager` is nil. Tests can
     /// inject a fake here.
@@ -546,3 +548,6 @@ extension BackgroundTaskManager {
         return url
     }
 }
+
+#endif // os(macOS)
+

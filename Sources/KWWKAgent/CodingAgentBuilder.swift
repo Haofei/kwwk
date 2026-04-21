@@ -7,29 +7,30 @@ import KWWKAI
 ///
 /// `.tmux` is only honored when `tmux` is on PATH; otherwise the tool is
 /// silently omitted so the model doesn't see something it can't use.
-/// `.bgStatus` is only honored when a `backgroundManager` is supplied.
-/// `.bash` works without a manager (legacy pipe executor) — it just loses
-/// `run_in_background` and the auto-background-on-timeout flip.
+/// `.taskStatus` and `.waitTask` are only honored when a `backgroundManager`
+/// is supplied. `.bash` works without a manager (legacy pipe executor) —
+/// it just loses `run_in_background` and the auto-background-on-timeout flip.
 public struct CodingTools: OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-    public static let read     = CodingTools(rawValue: 1 << 0)
-    public static let write    = CodingTools(rawValue: 1 << 1)
-    public static let edit     = CodingTools(rawValue: 1 << 2)
-    public static let bash     = CodingTools(rawValue: 1 << 3)
-    public static let grep     = CodingTools(rawValue: 1 << 4)
-    public static let find     = CodingTools(rawValue: 1 << 5)
-    public static let ls       = CodingTools(rawValue: 1 << 6)
-    public static let bgStatus = CodingTools(rawValue: 1 << 7)
-    public static let tmux     = CodingTools(rawValue: 1 << 8)
+    public static let read       = CodingTools(rawValue: 1 << 0)
+    public static let write      = CodingTools(rawValue: 1 << 1)
+    public static let edit       = CodingTools(rawValue: 1 << 2)
+    public static let bash       = CodingTools(rawValue: 1 << 3)
+    public static let grep       = CodingTools(rawValue: 1 << 4)
+    public static let find       = CodingTools(rawValue: 1 << 5)
+    public static let ls         = CodingTools(rawValue: 1 << 6)
+    public static let taskStatus = CodingTools(rawValue: 1 << 7)
+    public static let tmux       = CodingTools(rawValue: 1 << 8)
+    public static let waitTask   = CodingTools(rawValue: 1 << 9)
 
     /// Filesystem-scan only — no write, no edit, no shell, no PTY.
     public static let readOnly: CodingTools = [.read, .grep, .find, .ls]
 
     /// Everything.
     public static let all: CodingTools = [
-        .read, .write, .edit, .bash, .grep, .find, .ls, .bgStatus, .tmux,
+        .read, .write, .edit, .bash, .grep, .find, .ls, .taskStatus, .waitTask, .tmux,
     ]
 }
 
@@ -98,6 +99,7 @@ public func makeCodingAgent(_ config: CodingAgentConfig) async -> Agent {
     if config.tools.contains(.read)  { tools.append(createReadTool(cwd: cwd)) }
     if config.tools.contains(.write) { tools.append(createWriteTool(cwd: cwd)) }
     if config.tools.contains(.edit)  { tools.append(createEditTool(cwd: cwd)) }
+    #if os(macOS)
     if config.tools.contains(.bash) {
         tools.append(createBashTool(cwd: cwd, options: BashToolOptions(
             defaultTimeoutSeconds: config.bashDefaultTimeoutSeconds,
@@ -107,15 +109,21 @@ public func makeCodingAgent(_ config: CodingAgentConfig) async -> Agent {
             autoBackgroundOnTimeout: true
         )))
     }
+    #endif
     if config.tools.contains(.grep) { tools.append(createGrepTool(cwd: cwd)) }
     if config.tools.contains(.find) { tools.append(createFindTool(cwd: cwd)) }
     if config.tools.contains(.ls)   { tools.append(createLSTool(cwd: cwd)) }
-    if config.tools.contains(.bgStatus), let bgManager {
-        tools.append(createBgStatusTool(manager: bgManager, sessionId: sessionId))
+    if config.tools.contains(.taskStatus), let bgManager {
+        tools.append(createTaskStatusTool(manager: bgManager, sessionId: sessionId))
     }
-    if config.tools.contains(.tmux), let tmuxTool = await createTmuxTool() {
+    if config.tools.contains(.waitTask), let bgManager {
+        tools.append(createWaitTaskTool(manager: bgManager, sessionId: sessionId))
+    }
+    #if os(macOS)
+    if config.tools.contains(.tmux), let tmuxTool = await createTmuxTool(bgManager: bgManager, sessionId: sessionId) {
         tools.append(tmuxTool)
     }
+    #endif
 
     let systemPrompt = config.systemPrompt ?? buildSystemPrompt(SystemPromptOptions(
         cwd: cwd,

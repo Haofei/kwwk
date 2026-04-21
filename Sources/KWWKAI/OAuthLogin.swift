@@ -364,6 +364,59 @@ public enum OAuthLogin {
     }
 }
 
+// MARK: - GitHub Copilot post-login setup
+
+extension OAuthLogin {
+    /// Enable every model in `modelIds` on the Copilot account via
+    /// `POST {baseURL}/models/<id>/policy` with `{state: "enabled"}`.
+    /// Claude/Grok/Gemini models require this one-shot opt-in before the
+    /// chat endpoints will route to them; GPT-family models don't need it
+    /// but the call is idempotent so we fire for everything.
+    ///
+    /// Errors are swallowed per-model (best-effort): a 403 for a model the
+    /// account doesn't have entitlement for shouldn't abort the whole
+    /// login flow. Progress is reported through `onProgress` if set.
+    public static func enableCopilotModels(
+        sessionToken: String,
+        baseURL: URL = URL(string: "https://api.individual.githubcopilot.com")!,
+        modelIds: [String],
+        callbacks: Callbacks = Callbacks(),
+        client: HTTPClient = URLSessionHTTPClient()
+    ) async {
+        let baseString: String = {
+            var s = baseURL.absoluteString
+            while s.hasSuffix("/") { s.removeLast() }
+            return s
+        }()
+        let body = Data(#"{"state":"enabled"}"#.utf8)
+        for id in modelIds {
+            guard let url = URL(string: "\(baseString)/models/\(id)/policy") else { continue }
+            let headers: [String: String] = [
+                "content-type": "application/json",
+                "authorization": "Bearer \(sessionToken)",
+                "editor-version": "vscode/1.107.0",
+                "editor-plugin-version": "copilot-chat/0.35.0",
+                "user-agent": "GitHubCopilotChat/0.35.0",
+                "copilot-integration-id": "vscode-chat",
+                "openai-intent": "chat-policy",
+                "x-interaction-type": "chat-policy",
+            ]
+            do {
+                let (response, _) = try await client.request(
+                    url: url, method: "POST", headers: headers, body: body
+                )
+                if response.statusCode >= 400 {
+                    callbacks.onProgress("  · \(id): policy \(response.statusCode) (skipped)")
+                } else {
+                    callbacks.onProgress("  · \(id): enabled")
+                }
+            } catch {
+                callbacks.onProgress("  · \(id): \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
 // MARK: - Browser launcher
 
 public enum Browser {

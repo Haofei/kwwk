@@ -26,7 +26,7 @@ public enum CodingToolError: Error, Equatable, LocalizedError {
         case .offsetOutOfRange(let offset, let total):
             return "offset \(offset) is beyond end of file (\(total) lines total)"
         case .aborted:
-            return "aborted"
+            return "aborted by user"
         case .commandFailed(let stderr, let exitCode):
             let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {

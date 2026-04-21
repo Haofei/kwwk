@@ -30,6 +30,13 @@ func runCodingTUIInternal(
     if let apiKeyResolver {
         agent.apiKeyResolver = apiKeyResolver
     }
+    // Turn on extended thinking by default — otherwise reasoning-capable
+    // providers never produce `[thinking]` blocks. The level is a user
+    // intent: the agent loop filters it to `nil` when the live model
+    // isn't reasoning-capable, so non-thinking models pay no cost and
+    // `/model` switches flow naturally in either direction. Toggle via
+    // `/thinking off` (or `high` / `xhigh` for thornier problems).
+    agent.state.thinkingLevel = .medium
 
     // --- TUI (shared layout) --------------------------------------------
     // Inline render mode — the frame anchors at the current cursor and
@@ -40,24 +47,24 @@ func runCodingTUIInternal(
     let layout = CodingLayout(statusRows: 1)
     let renderer = TranscriptRenderer()
 
-    // Header is rebuilt whenever the context-usage reading changes, so
-    // the capacity suffix stays fresh. As a captured closure (not a
-    // local `func`) so the auto-compact callback can be @Sendable.
+    // Print the header banner once, as ordinary terminal output. It
+    // sits above the live zone at startup and scrolls into native
+    // scrollback as content piles up — same treatment as any other
+    // committed line. Per-turn capacity (`42% ctx`) moves to the
+    // status bar so we don't need to re-render this block.
     let cwdShort = shortenPath(cwd, to: max(20, runner.terminal.width - 4))
-    let renderHeader: @MainActor @Sendable (String) -> Void = { capacityHint in
-        var modelLine = "  \(modelLabel)"
-        if !capacityHint.isEmpty {
-            modelLine += "  \(capacityHint)"
-        }
-        layout.header.lines = [
-            Style.header("✻ kwwk coding agent"),
-            Style.dimmed(modelLine),
-            Style.dimmed("  \(cwdShort)"),
-        ]
+    let bannerLines: [String] = [
+        Style.header("✻ kwwk coding agent"),
+        Style.dimmed("  \(modelLabel)"),
+        Style.dimmed("  \(cwdShort)"),
+        "",
+    ]
+    for line in bannerLines {
+        runner.terminal.write(line + "\r\n")
     }
-    renderHeader("")
+
     layout.install(into: runner.tui)
-    layout.fitViewport(height: runner.terminal.height)
+    layout.fitViewport(height: runner.terminal.height, width: runner.terminal.width)
     runner.focus(layout.promptRow)
 
     // Paste plumbing: `onPaste` is called whenever the terminal
@@ -73,34 +80,63 @@ func runCodingTUIInternal(
             tui: runner.tui
         )
     }
-    _ = runner.terminal.onResize { _, h in
+    _ = runner.terminal.onResize { w, h in
         Task { @MainActor in
-            layout.fitViewport(height: h)
+            layout.fitViewport(height: h, width: w)
             runner.tui.requestRender()
         }
     }
 
-    // Non-LLM messages the coding TUI wants to surface to the user
-    // ("switched to gpt-5.4", "unknown slash command /foo", etc.). These
-    // ride along with the transcript so they stay visible as the view
-    // scrolls.
-    let notifications = NotificationLog()
-    // `recomputeTranscript` is a captured @Sendable closure (not a local
-    // `func`) so it can be passed into the agent's `subscribe` callback
-    // and into ModalHost without Swift 6's strict-concurrency checker
-    // complaining about non-Sendable function references.
+    // Non-LLM messages the coding TUI wants to surface ("switched to
+    // gpt-5.4", "unknown slash command /foo", attach issues, etc.) are
+    // committed directly to scrollback via `runner.tui.commit(...)`.
+    // There's no separate notification block in the live zone — those
+    // were annoying (user couldn't dismiss them, took vertical space,
+    // complicated the layout math). Slash commands are gated to the
+    // idle state below so we never need to interleave them with
+    // streaming output.
+    //
+    // `recomputeTranscript` rebuilds the live tail (streaming body +
+    // running tool markers) from the renderer's current state. Before
+    // reading the tail we let the renderer spill any streaming-body
+    // overflow into its commit buffer — that way long assistant turns
+    // scroll into native scrollback as they stream instead of just
+    // clipping at the top of the viewport.
     let recomputeTranscript: @MainActor @Sendable () -> Void = {
-        layout.setTranscript(renderer.lines.all + notifications.all)
+        renderer.applyLiveBudget(layout.liveTailBudget, reserved: 0)
+        layout.setLiveTail(renderer.liveLines)
     }
 
     // Modal overlay host — takes over the transcript area for selectors
     // (/model). Only one modal is active at a time; its bindings are
-    // wired below via `modal.routeXxx`.
+    // wired below via `modal.routeXxx`. On close we both restore the
+    // live tail and drain any commits that accumulated while the modal
+    // was up, so scrollback catches up to what the agent did in the
+    // meantime.
     let modal = ModalHost(
         layout: layout,
-        restoreTranscript: recomputeTranscript,
+        restoreTranscript: {
+            let committed = renderer.drainCommits()
+            if !committed.isEmpty { runner.tui.commit(committed) }
+            recomputeTranscript()
+        },
         requestRender: { runner.tui.requestRender() }
     )
+
+    /// Drain the renderer's commit buffer and forward to the TUI so the
+    /// newly-settled lines show up above the live zone on the next
+    /// render. Called after every agent event + after modal close.
+    ///
+    /// While a modal is open we deliberately leave commits sitting in
+    /// the renderer's buffer: flushing would print history lines above
+    /// the modal and make the UI feel noisy. They drain on close.
+    let flushCommits: @MainActor @Sendable () -> Void = {
+        guard !modal.isOpen else { return }
+        let committed = renderer.drainCommits()
+        if !committed.isEmpty {
+            runner.tui.commit(committed)
+        }
+    }
 
     // Queue panel: a persistent listing of steering messages waiting
     // for a turn boundary, rendered between the status bar and the
@@ -152,52 +188,77 @@ func runCodingTUIInternal(
             switch status {
             case .compacting(let count):
                 statusBar.setCompacting(messageCount: count)
-                notifications.append(Style.dimmed("  auto-compact: summarizing \(count) messages…"))
-                if !modal.isOpen { recomputeTranscript() }
                 runner.tui.requestRender()
             case .idle:
                 statusBar.setMode(.idle)
             }
         },
         onUsageChange: { usage in
-            renderHeader(formatCapacityHint(
+            statusBar.setCapacityHint(formatCapacityHint(
                 usage: usage,
                 threshold: autoCompactThreshold
             ))
-            runner.tui.requestRender()
+            Task { @MainActor in
+                await statusBar.render()
+                runner.tui.requestRender()
+            }
         },
         onCompactFinished: { outcome in
-            // Surface outcome as a transcript notification. The
-            // `notifications` log is cleared on the next Enter so the
-            // "compacted N → 1 recap" line doesn't stick around forever.
             switch outcome {
             case .compacted(let n, let hasLedger):
-                var note = "  auto-compact: compacted \(n) messages → 1 recap"
-                if hasLedger { note += " (+ running-task ledger)" }
-                notifications.append(Style.prompt(note))
+                var lines: [String] = [
+                    "",
+                    Style.dimmed("  auto-compact: summarizing \(n) messages…"),
+                ]
+                lines.append(contentsOf: renderCompactBoundary(
+                    messagesCompacted: n,
+                    hasRunningTasksLedger: hasLedger,
+                    width: runner.terminal.width
+                ))
+                runner.tui.commit(lines)
             case .refusedAgentBusy:
-                // Can't happen: we only enter maybeCompact on agentEnd
-                // and the guard in `performCompact` is belt-and-braces.
-                break
+                runner.tui.commit([
+                    "",
+                    Style.error("  auto-compact: agent is busy; compact skipped"),
+                    "",
+                ])
             case .refusedTooFewMessages:
-                break  // never surface for the auto path
+                break
             case .failed(let msg):
-                notifications.append(Style.error("  auto-compact: \(msg)"))
+                runner.tui.commit([
+                    "",
+                    Style.error("  auto-compact failed: \(msg)"),
+                    "",
+                ])
             }
-            if !modal.isOpen { recomputeTranscript() }
             runner.tui.requestRender()
         }
     )
 
+    // Keep the renderer's display mode in sync with the agent's state on
+    // every event, so `/thinking show|hide` (which only mutates agent
+    // state) takes effect on the next turn without extra plumbing.
+    renderer.setThinkingDisplay(agent.state.thinkingDisplay)
     _ = agent.subscribe { event, _ in
         await MainActor.run {
+            renderer.setThinkingDisplay(agent.state.thinkingDisplay)
             renderer.apply(event)
-            // Don't clobber an open modal. When it closes, the host's
-            // restoreTranscript hook runs `recomputeTranscript()` so any
-            // state that accumulated during the modal pops back into view.
+            // Order matters here:
+            //   1. recomputeTranscript() — may spill streaming overflow
+            //      into the commit buffer as a side effect (long
+            //      assistant turns need to scroll their head into
+            //      scrollback as they grow).
+            //   2. flushCommits() — forwards everything (settled lines
+            //      from `apply` PLUS spill from the live-budget step)
+            //      to the TUI in one batch so a single render emits
+            //      all of it.
+            // When a modal is open we leave the live tail alone and
+            // let the modal keep the display; pending commits buffer
+            // until close, then drain together.
             if !modal.isOpen {
                 recomputeTranscript()
             }
+            flushCommits()
             switch event {
             case .agentStart:
                 statusBar.setMode(.streaming)
@@ -210,13 +271,21 @@ func runCodingTUIInternal(
                 if !autoCompact.isCompacting {
                     statusBar.setMode(.idle)
                 }
+            case .streamRetry(let attempt, let delayMs, let reason):
+                statusBar.setRetrying(attempt: attempt, delayMs: delayMs, reason: reason)
+            case .messageStart, .messageUpdate:
+                // A new stream is producing output again — drop the
+                // retrying banner. We don't fall out of retrying on the
+                // next `streamRetry` (back-to-back failures): setRetrying
+                // simply overwrites the payload with fresher info.
+                statusBar.setMode(.streaming)
             default: break
             }
             // The agent loop drains the steering queue at turn
             // boundaries — refresh the panel on every event so a
             // queued prompt disappears as soon as it enters context.
             refreshQueuePanel()
-            layout.fitViewport(height: runner.terminal.height)
+            layout.fitViewport(height: runner.terminal.height, width: runner.terminal.width)
             runner.tui.requestRender()
         }
         await autoCompact.observe(event)
@@ -224,8 +293,12 @@ func runCodingTUIInternal(
     }
 
     // Slash command registry. Handlers get a `SlashContext` with the
-    // agent + modal host + a `notify` hook that prints a dimmed line into
-    // the transcript.
+    // agent + modal host + a `notify` hook that commits a line to
+    // scrollback. There's no ephemeral notification area anymore:
+    // every slash-command output — `/help`, `/queue`, `/model` status,
+    // attach warnings, etc. — flows straight into history so the user
+    // can scroll up to see what happened and no dedicated "block"
+    // needs to be dismissed.
     let slashRegistry = SlashCommandRegistry()
     registerBuiltinSlashCommands(slashRegistry)
     let slashContext = SlashContext(
@@ -233,9 +306,24 @@ func runCodingTUIInternal(
         modal: modal,
         backgroundManager: bgManager,
         sessionId: sessionId,
-        notify: { line in
-            notifications.append(line)
-            if !modal.isOpen { recomputeTranscript() }
+        notifyBlock: { lines in
+            guard !lines.isEmpty else { return }
+            // "Every scrollback block opens with a leading blank, never
+            // closes with one" — the whole notification is one block so
+            // we prepend exactly one blank regardless of how many lines
+            // the caller supplies.
+            runner.tui.commit([""] + lines)
+            runner.tui.requestRender()
+        },
+        commitScrollback: { render in
+            let lines = render(runner.terminal.width)
+            guard !lines.isEmpty else { return }
+            runner.tui.commit(lines)
+            runner.tui.requestRender()
+        },
+        refreshTranscript: {
+            renderer.setThinkingDisplay(agent.state.thinkingDisplay)
+            recomputeTranscript()
             runner.tui.requestRender()
         }
     )
@@ -252,7 +340,7 @@ func runCodingTUIInternal(
     //      the first is streaming would throw `alreadyRunning` and
     //      blow the input away. Steering lets the user queue a
     //      follow-up without racing the current turn.
-    runner.bind(.init("enter")) { _ in
+    runner.bind(.init("enter", shift: false)) { _ in
         Task { @MainActor in
             if modal.isOpen {
                 modal.routeConfirm()
@@ -262,21 +350,31 @@ func runCodingTUIInternal(
             guard !text.isEmpty else { return }
 
             let parsed = SlashInput.parse(text)
+            let busy = agent.state.isStreaming || autoCompact.isCompacting
 
-            // Slash commands always work, even while streaming or
-            // auto-compacting, because they don't call `agent.prompt`.
-            // For LLM prompts we check state first so we can steer
-            // instead of racing the current turn / the pending
-            // message-array replacement. The queue panel above the
-            // input (see `refreshQueuePanel`) shows what's waiting —
-            // no transcript notification needed since the panel is
-            // persistent until the message drains.
-            if case .prompt = parsed, agent.state.isStreaming || autoCompact.isCompacting {
-                // Build the attachment-enriched message just like the
-                // non-streaming path so a pasted @path / image goes
-                // into the queue with the right shape — otherwise a
-                // queued prompt would drop its attachments when it
-                // finally drains.
+            // Slash commands are idle-only. If the agent is mid-turn
+            // we can't reliably run them (some mutate agent state, all
+            // would need to interleave output with streaming). Keeping
+            // the gate simple means we never need a floating
+            // "notification block" to surface their output — they
+            // always commit to scrollback on a quiet moment.
+            if case .command = parsed, busy {
+                runner.tui.commit([
+                    "",
+                    Style.error("  slash commands run only when the agent is idle — stop it first (Esc) or wait"),
+                    "",
+                ])
+                runner.tui.requestRender()
+                return
+            }
+
+            // LLM prompt while the agent is busy: steer as a queued
+            // user message so it runs at the next turn boundary. We
+            // do NOT drop the typed text — starting a second
+            // agent.prompt while the first is streaming would throw
+            // `alreadyRunning`. The queue panel above the input
+            // shows what's waiting.
+            if case .prompt = parsed, busy {
                 let built = buildPromptWithAttachments(
                     text: text,
                     store: attachments,
@@ -288,9 +386,15 @@ func runCodingTUIInternal(
                 agent.steer(.user(UserMessage(content: blocks)))
                 attachments.clear()
                 layout.input.value = ""
-                if let summary = built.summary {
-                    notifications.append(Style.dimmed("  " + summary))
-                    recomputeTranscript()
+                // Surface only attach problems — a clean queueing
+                // needs no confirmation, the queue panel already
+                // shows the pending item.
+                if let issues = built.issues {
+                    runner.tui.commit([
+                        "",
+                        Style.error("  attach: " + issues),
+                        "",
+                    ])
                 }
                 refreshQueuePanel()
                 runner.tui.requestRender()
@@ -298,12 +402,6 @@ func runCodingTUIInternal(
             }
 
             layout.input.value = ""
-            // Each non-empty Enter starts a fresh action — expire the
-            // notifications from the previous one (e.g. stale `/help`
-            // output, `/model: cancelled` crumbs) so they don't pile up
-            // forever below the transcript.
-            notifications.clear()
-            recomputeTranscript()
             runner.tui.requestRender()
 
             switch parsed {
@@ -316,8 +414,11 @@ func runCodingTUIInternal(
                     refreshQueuePanel()
                     runner.tui.requestRender()
                 } else {
-                    notifications.append(Style.error("  unknown slash command: /\(name)"))
-                    recomputeTranscript()
+                    runner.tui.commit([
+                        "",
+                        Style.error("  unknown slash command: /\(name)"),
+                        "",
+                    ])
                     runner.tui.requestRender()
                 }
             case .prompt:
@@ -331,9 +432,12 @@ func runCodingTUIInternal(
                     modelSupportsImages: agent.state.model.input.contains(.image)
                 )
                 attachments.clear()
-                if let summary = built.summary {
-                    notifications.append(Style.dimmed("  " + summary))
-                    recomputeTranscript()
+                if let issues = built.issues {
+                    runner.tui.commit([
+                        "",
+                        Style.error("  attach: " + issues),
+                        "",
+                    ])
                     runner.tui.requestRender()
                 }
                 let promptText = built.text
@@ -404,7 +508,16 @@ func runCodingTUIInternal(
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 500_000_000)
             await statusBar.render()
-            await MainActor.run { refreshQueuePanel() }
+            await MainActor.run {
+                refreshQueuePanel()
+                // Tick the collapsed-thinking elapsed counter while a
+                // thinking block is open so seconds advance even without
+                // new provider deltas. No-op otherwise.
+                if renderer.hasActiveThinking {
+                    recomputeTranscript()
+                    runner.tui.requestRender()
+                }
+            }
         }
     }
     defer { pollTask.cancel() }
@@ -420,20 +533,6 @@ func runCodingTUIInternal(
 }
 
 // MARK: - Helpers
-
-/// Non-LLM lines surfaced beneath the transcript (slash-command output,
-/// modal results, error toasts). Kept separate from `TranscriptRenderer`'s
-/// accumulated lines so we can rebuild the display as
-/// `renderer + notifications` without losing either stream.
-///
-/// Lifetime: cleared on each new Enter press so feedback from a previous
-/// action doesn't accumulate indefinitely.
-@MainActor
-final class NotificationLog {
-    private(set) var all: [String] = []
-    func append(_ line: String) { all.append(line) }
-    func clear() { all.removeAll() }
-}
 
 private func shortenPath(_ path: String, to maxLen: Int) -> String {
     if path.count <= maxLen { return path }

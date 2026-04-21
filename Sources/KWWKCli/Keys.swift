@@ -32,7 +32,15 @@ enum Keys {
             let b = bytes[0]
             switch b {
             case 0x0D: return KeyEvent(name: "enter", raw: data)
-            case 0x0A: return KeyEvent(name: "enter", raw: data)
+            // 0x0A (LF) is ASCII Ctrl+J. Historically some terminals
+            // ship it when the user presses Enter, but modern *nix
+            // terminals always send CR (0x0D) for Enter; a raw LF on
+            // stdin today means the user actually hit Ctrl+J (or
+            // Return was interpreted by a keyboard protocol that
+            // distinguishes newline from carriage return). Surface it
+            // as Ctrl+J so multi-line editors can pick it up as
+            // "insert newline" while plain Enter stays free for submit.
+            case 0x0A: return KeyEvent(name: "j", ctrl: true, raw: data)
             case 0x09: return KeyEvent(name: "tab", raw: data)
             case 0x7F: return KeyEvent(name: "backspace", raw: data)
             case 0x20: return KeyEvent(name: "space", raw: data)
@@ -54,13 +62,26 @@ enum Keys {
         // ESC-prefixed sequences — CSI, SS3, or alt+<x>.
         if bytes[0] == 0x1B {
             if bytes.count == 2 {
-                // ESC + single char → alt+<char>
-                let scalar = UnicodeScalar(bytes[1])
-                return KeyEvent(
-                    name: String(Character(scalar)).lowercased(),
-                    alt: true,
-                    raw: data
-                )
+                // ESC + single-byte keypress = Alt-modified version of
+                // that key. Translate common control bytes to their
+                // logical names before falling back to the raw char —
+                // so Alt+Enter surfaces as name=="enter" instead of
+                // "\r", Alt+Tab as "tab", etc.
+                switch bytes[1] {
+                case 0x0D, 0x0A:
+                    return KeyEvent(name: "enter", alt: true, raw: data)
+                case 0x09:
+                    return KeyEvent(name: "tab", alt: true, raw: data)
+                case 0x7F:
+                    return KeyEvent(name: "backspace", alt: true, raw: data)
+                default:
+                    let scalar = UnicodeScalar(bytes[1])
+                    return KeyEvent(
+                        name: String(Character(scalar)).lowercased(),
+                        alt: true,
+                        raw: data
+                    )
+                }
             }
             if bytes[1] == 0x5B {  // '['
                 let tail = String(data.dropFirst(2))
@@ -97,6 +118,17 @@ enum Keys {
         case "R": base = "f3"
         case "S": base = "f4"
         case "Z": base = "tab"
+        case "u":
+            // Kitty keyboard protocol: CSI <keycode> ; <mod> u
+            let parts = params.split(separator: ";")
+            if let code = Int(parts.first.map(String.init) ?? "") {
+                switch code {
+                case 13: base = "enter"
+                default: return nil
+                }
+            } else {
+                return nil
+            }
         case "~":
             base = Keys.tildeKey(params)
         default: base = nil
@@ -167,7 +199,7 @@ struct KeyBinding: Sendable, Hashable {
         event.name == name
             && event.ctrl == ctrl
             && event.alt == alt
-            && (shift == false || event.shift == shift)
+            && event.shift == shift
     }
 }
 

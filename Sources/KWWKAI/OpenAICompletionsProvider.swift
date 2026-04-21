@@ -52,7 +52,13 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         self.urlBuilder = urlBuilder ?? { model, _, fallback in
             var base = model.baseUrl.isEmpty ? fallback.absoluteString : model.baseUrl
             while base.hasSuffix("/") { base.removeLast() }
-            return URL(string: "\(base)/v1/chat/completions")
+            // Tolerate catalog entries that bake `/v1` into baseUrl
+            // (pi-mono's models.generated.ts does this for OpenAI).
+            // Without this, the session baseUrl `https://api.openai.com`
+            // → `/v1/chat/completions`, but a `/model` swap pulls in
+            // `https://api.openai.com/v1` and we'd double-suffix.
+            let versioned = base.hasSuffix("/v1") ? base : "\(base)/v1"
+            return URL(string: "\(versioned)/chat/completions")
                 ?? fallback.appendingPathComponent("v1/chat/completions")
         }
         self.authHeaderBuilder = authHeaderBuilder ?? { key in ["authorization": "Bearer \(key)"] }

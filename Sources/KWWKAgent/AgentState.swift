@@ -13,6 +13,7 @@ public final class AgentState: @unchecked Sendable {
     private var _systemPrompt: String
     private var _model: Model
     private var _thinkingLevel: ThinkingLevel
+    private var _thinkingDisplay: ThinkingDisplay
     private var _tools: [AgentTool]
     private var _messages: [Message]
     private var _isStreaming: Bool = false
@@ -24,12 +25,14 @@ public final class AgentState: @unchecked Sendable {
         systemPrompt: String = "",
         model: Model,
         thinkingLevel: ThinkingLevel = .off,
+        thinkingDisplay: ThinkingDisplay = .collapsed,
         tools: [AgentTool] = [],
         messages: [Message] = []
     ) {
         self._systemPrompt = systemPrompt
         self._model = model
         self._thinkingLevel = thinkingLevel
+        self._thinkingDisplay = thinkingDisplay
         self._tools = tools
         self._messages = messages
     }
@@ -49,6 +52,11 @@ public final class AgentState: @unchecked Sendable {
     public var thinkingLevel: ThinkingLevel {
         get { lock.withLock { _thinkingLevel } }
         set { lock.withLock { _thinkingLevel = newValue } }
+    }
+
+    public var thinkingDisplay: ThinkingDisplay {
+        get { lock.withLock { _thinkingDisplay } }
+        set { lock.withLock { _thinkingDisplay = newValue } }
     }
 
     /// Array setter copies to prevent external aliasing. Reads return a

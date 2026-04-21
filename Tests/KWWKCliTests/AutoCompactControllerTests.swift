@@ -124,7 +124,7 @@ struct AutoCompactGatingTests {
             onCompactFinished: { o in outcomes.append(o) }
         )
 
-        await controller.observe(.agentEnd(messages: messages))
+        await controller.observe(.agentEnd(messages: messages, summary: AgentRunSummary()))
 
         // 165_000 / 200_000 = 0.825 > 0.75 → should compact.
         #expect(agent.state.messages.count == 1, "should have replaced transcript with the recap")
@@ -163,7 +163,7 @@ struct AutoCompactGatingTests {
             threshold: 0.75,
             onCompactFinished: { o in outcomes.append(o) }
         )
-        await controller.observe(.agentEnd(messages: messages))
+        await controller.observe(.agentEnd(messages: messages, summary: AgentRunSummary()))
 
         #expect(agent.state.messages.count == messages.count, "no compact should fire at 5% utilization")
         #expect(outcomes.count == 0)
@@ -199,7 +199,7 @@ struct AutoCompactGatingTests {
             threshold: nil,
             onCompactFinished: { o in outcomes.append(o) }
         )
-        await controller.observe(.agentEnd(messages: messages))
+        await controller.observe(.agentEnd(messages: messages, summary: AgentRunSummary()))
 
         #expect(agent.state.messages.count == messages.count, "nil threshold must not compact, even at 90% utilization")
         #expect(outcomes.count == 0)

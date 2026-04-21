@@ -60,6 +60,68 @@ struct AdoptFieldsMaxTokensTests {
     }
 }
 
+@Suite("adoptFields session routing")
+struct AdoptFieldsSessionRoutingTests {
+    private func model(
+        id: String, api: String, provider: String, baseUrl: String, maxTokens: Int = 4096
+    ) -> Model {
+        Model(
+            id: id, name: id, api: api, provider: provider, baseUrl: baseUrl,
+            reasoning: false, input: [.text], contextWindow: 0, maxTokens: maxTokens
+        )
+    }
+
+    @Test("same-provider swap keeps the session's baseUrl")
+    func sameProviderPreservesBaseUrl() {
+        // Mimics the real bug: user logs in with anthropic-api-key using a
+        // custom baseUrl (e.g. a corporate proxy). `/model` switching to
+        // another Claude model from the catalog must not drop that host
+        // in favor of the catalog's `https://api.anthropic.com`.
+        let current = model(
+            id: "claude-sonnet-4-5-20250929",
+            api: "anthropic-messages",
+            provider: "anthropic",
+            baseUrl: "https://proxy.example.com"
+        )
+        let picked = model(
+            id: "claude-haiku-4-5",
+            api: "anthropic-messages",
+            provider: "anthropic",
+            baseUrl: "https://api.anthropic.com"
+        )
+        let result = adoptFields(from: current, into: picked)
+        #expect(result.id == "claude-haiku-4-5")
+        #expect(result.baseUrl == "https://proxy.example.com",
+                "session baseUrl must survive same-provider /model swap")
+    }
+
+    @Test("Copilot cross-wire swap adopts picked's api but keeps session baseUrl")
+    func copilotCrossWire() {
+        // Copilot Business/Enterprise: registerGitHubCopilot stamps the
+        // proxy endpoint onto the initial model. Switching from a
+        // completions-wire model (gpt-4.1) to an anthropic-messages-wire
+        // model (claude-sonnet-4.5) must carry picked.api through, but
+        // keep the enterprise baseUrl.
+        let current = model(
+            id: "gpt-4.1",
+            api: "openai-completions",
+            provider: "github-copilot",
+            baseUrl: "https://api.business.githubcopilot.com"
+        )
+        let picked = model(
+            id: "claude-sonnet-4.5",
+            api: "anthropic-messages",
+            provider: "github-copilot",
+            baseUrl: "https://api.individual.githubcopilot.com"
+        )
+        let result = adoptFields(from: current, into: picked)
+        #expect(result.api == "anthropic-messages",
+                "picked's wire format must be used — routing by api key")
+        #expect(result.baseUrl == "https://api.business.githubcopilot.com",
+                "session (enterprise) baseUrl must survive the cross-wire swap")
+    }
+}
+
 @Suite("catalogProviderKey")
 struct CatalogProviderKeyTests {
     @Test("chatgpt-codex maps to openai-codex; others pass through")
@@ -229,6 +291,7 @@ struct CompactPreservesRunningTasksTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         let notifier = NotifierBox()
+        let commits = CommitBox()
         let ctx = SlashContext(
             agent: agent,
             modal: ModalHost(
@@ -238,7 +301,9 @@ struct CompactPreservesRunningTasksTests {
             ),
             backgroundManager: bgManager,
             sessionId: "sess",
-            notify: { notifier.append($0) }
+            notifyBlock: { lines in for l in lines { notifier.append(l) } },
+            commitScrollback: commits.collect(),
+            refreshTranscript: {}
         )
         let registry = SlashCommandRegistry()
         registerBuiltinSlashCommands(registry)
@@ -256,7 +321,9 @@ struct CompactPreservesRunningTasksTests {
         #expect(text.contains("<running-background-tasks>"),
                 "a task is still running — its id + output path should be in the recap")
         #expect(text.contains(taskId), "task id should appear in the ledger so the next turn can Read its output")
-        #expect(notifier.joined.contains("running-task ledger"))
+        // The ledger suffix shows up in the scrollback boundary so
+        // users can spot compacts that carried running-task state.
+        #expect(commits.joined.contains("running-task ledger"))
     }
 
     @MainActor
@@ -290,7 +357,9 @@ struct CompactPreservesRunningTasksTests {
             ),
             backgroundManager: bgManager,
             sessionId: "sess",
-            notify: { notifier.append($0) }
+            notifyBlock: { lines in for l in lines { notifier.append(l) } },
+            commitScrollback: { _ in },
+            refreshTranscript: {}
         )
         let registry = SlashCommandRegistry()
         registerBuiltinSlashCommands(registry)

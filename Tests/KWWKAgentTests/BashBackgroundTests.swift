@@ -3,14 +3,14 @@ import Testing
 @testable import KWWKAgent
 @testable import KWWKAI
 
-private func makeTempDir() -> URL {
+func makeTempDir() -> URL {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("kw-bashbg-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir
 }
 
-private func awaitUntil(
+func awaitUntil(
     _ budgetMs: Int,
     _ predicate: @Sendable () async -> Bool
 ) async -> Bool {
@@ -285,8 +285,8 @@ struct BashToolBackgroundTests {
     }
 }
 
-@Suite("bg_status tool")
-struct BgStatusToolTests {
+@Suite("task_status tool")
+struct TaskStatusToolTests {
 
     @Test("list returns running tasks")
     func listRunning() async throws {
@@ -298,7 +298,7 @@ struct BgStatusToolTests {
         let (taskId, _) = await manager.spawn(runner: runner, sessionId: "s1")
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         let result = try await tool.execute(
             "call-1",
             .object(["action": .string("list")]),
@@ -324,7 +324,7 @@ struct BgStatusToolTests {
         }
         #expect(done)
 
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         let result = try await tool.execute(
             "call-1",
             .object(["action": .string("status"), "task_id": .string(taskId)]),
@@ -345,7 +345,7 @@ struct BgStatusToolTests {
         let (taskId, _) = await manager.spawn(runner: runner, sessionId: "s1")
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         _ = try await tool.execute(
             "call-1",
             .object(["action": .string("kill"), "task_id": .string(taskId)]),
@@ -365,7 +365,7 @@ struct BgStatusToolTests {
         let outputDir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: outputDir) }
         let manager = BackgroundTaskManager(outputDir: outputDir)
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         await #expect(throws: Error.self) {
             _ = try await tool.execute(
                 "c1",
@@ -380,7 +380,7 @@ struct BgStatusToolTests {
         let outputDir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: outputDir) }
         let manager = BackgroundTaskManager(outputDir: outputDir)
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         await #expect(throws: Error.self) {
             _ = try await tool.execute(
                 "c1",
@@ -401,7 +401,7 @@ struct BgStatusToolTests {
             let s = await manager.get(taskId)
             return s?.status != .running
         }
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         let result = try await tool.execute(
             "c1",
             .object(["action": .string("kill"), "task_id": .string(taskId)]),
@@ -419,7 +419,7 @@ struct BgStatusToolTests {
         let outputDir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: outputDir) }
         let manager = BackgroundTaskManager(outputDir: outputDir)
-        let tool = createBgStatusTool(manager: manager, sessionId: "s1")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "s1")
         let result = try await tool.execute(
             "c1",
             .object(["action": .string("list")]),
@@ -443,7 +443,7 @@ struct BgStatusToolTests {
             return s?.status != .running
         }
 
-        let tool = createBgStatusTool(manager: manager, sessionId: "sB")
+        let tool = createTaskStatusTool(manager: manager, sessionId: "sB")
         await #expect(throws: Error.self) {
             _ = try await tool.execute(
                 "call-1",

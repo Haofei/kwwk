@@ -1,6 +1,8 @@
 import Foundation
 import KWWKAI
 
+#if os(macOS)
+
 /// Exposes `TmuxSessionManager` to the agent as a single multiplexed tool.
 /// The tool is only meaningful when tmux is available on PATH — the factory
 /// returns nil otherwise so the agent doesn't see a tool it can't actually
@@ -14,8 +16,14 @@ import KWWKAI
 /// { "action": "kill", "pane_id": "%3" }
 /// { "action": "list" }
 /// ```
-public func createTmuxTool(manager: TmuxSessionManager = .shared) async -> AgentTool? {
+public func createTmuxTool(
+    manager: TmuxSessionManager = .shared,
+    bgManager: BackgroundTaskManager? = nil,
+    sessionId: String? = nil
+) async -> AgentTool? {
     guard await manager.isAvailable else { return nil }
+    // `bgManager` and `sessionId` wire the tmux pane into the
+    // background-task registry so panes appear in task_status / wait_task.
 
     let parameters: JSONValue = .object([
         "type": .string("object"),
@@ -76,7 +84,8 @@ public func createTmuxTool(manager: TmuxSessionManager = .shared) async -> Agent
         label: "tmux",
         description: description,
         parameters: parameters,
-        execute: { _, args, _, _ in
+        execute: { _, args, cancellation, _ in
+            try cancellation?.throwIfCancelled()
             guard case .object(let obj) = args,
                   case .string(let action) = obj["action"] ?? .null else {
                 throw CodingToolError.invalidArgument("tmux: `action` is required")
@@ -96,14 +105,66 @@ public func createTmuxTool(manager: TmuxSessionManager = .shared) async -> Agent
                     return nil
                 }()
                 let info = try await manager.startPane(command: command, workDir: workDir, name: name)
-                let msg = "Started pane \(info.paneId) running: \(command)"
+
+                var details: [String: JSONValue] = [
+                    "pane_id": .string(info.paneId),
+                    "name": .string(info.name),
+                    "command": .string(info.command),
+                ]
+                var msg = "Started pane \(info.paneId) running: \(command)"
+
+                // Bridge to BackgroundTaskManager so the pane shows up in
+                // task_status / wait_task and emits a completion notification.
+                if let bgManager {
+                    let outputFile = bgManager.outputDir
+                        .appendingPathComponent("tmux_\(info.paneId).log")
+                    try? await manager.pipePaneOutput(paneId: info.paneId, toFile: outputFile)
+
+                    let spec = BackgroundTaskSpec(
+                        kind: "tmux",
+                        label: info.command,
+                        description: "tmux pane \(info.paneId)",
+                        hardTimeoutSeconds: 1800
+                    )
+
+                    let (taskId, _) = await bgManager.adopt(
+                        spec: spec,
+                        outputFile: outputFile,
+                        sessionId: sessionId,
+                        waitForCompletion: { cancellation in
+                            let pollInterval: UInt64 = 250_000_000
+                            while true {
+                                if cancellation.isCancelled {
+                                    try? await manager.killPane(info.paneId)
+                                    return BackgroundTaskOutcome(
+                                        success: false,
+                                        summary: "killed",
+                                        details: nil,
+                                        errorMessage: nil
+                                    )
+                                }
+                                let dead = await manager.isPaneDead(info.paneId)
+                                if dead {
+                                    let exitCode = await manager.paneExitStatus(info.paneId)
+                                    let success = exitCode == 0
+                                    return BackgroundTaskOutcome(
+                                        success: success,
+                                        summary: exitCode != nil ? "exit \(exitCode!)" : "pane closed",
+                                        details: exitCode.map { .object(["exitCode": .int($0)]) },
+                                        errorMessage: nil
+                                    )
+                                }
+                                try? await Task.sleep(nanoseconds: pollInterval)
+                            }
+                        }
+                    )
+                    details["task_id"] = .string(taskId)
+                    msg += "\nTask ID: \(taskId) (track with task_status / wait_task)"
+                }
+
                 return AgentToolResult(
                     content: [.text(TextContent(text: msg))],
-                    details: .object([
-                        "pane_id": .string(info.paneId),
-                        "name": .string(info.name),
-                        "command": .string(info.command),
-                    ])
+                    details: .object(details)
                 )
 
             case "send_keys":
@@ -184,3 +245,6 @@ public func createTmuxTool(manager: TmuxSessionManager = .shared) async -> Agent
         }
     )
 }
+
+#endif // os(macOS)
+

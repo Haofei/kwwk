@@ -23,12 +23,13 @@ struct InputPasteTests {
         #expect(input.value == "", "handler was installed — component must not also insert")
     }
 
-    @Test("multi-line paste is flattened when no handler is installed")
-    func multilineFlattened() {
+    @Test("multi-line paste preserves newlines when no handler is installed")
+    func multilinePreservesNewlines() {
         let input = InputComponent()
         input.handleInput("\u{1B}[200~first\nsecond\u{1B}[201~")
-        #expect(input.value == "first second",
-                "single-line input: newline must become a space so cursor math stays coherent")
+        // The editor is multi-line: `\n` in pasted bodies survives as
+        // a literal newline in the buffer and renders as a hard break.
+        #expect(input.value == "first\nsecond")
     }
 
     @Test("non-paste input still behaves normally")

@@ -298,10 +298,17 @@ private func renderFolderListing(_ path: String) -> String {
 struct BuiltPrompt {
     let text: String
     let images: [ImageContent]
-    /// Short human-readable summary ("attached: 1 image, 2 files") —
-    /// rendered as a dimmed notification in the transcript so the user
-    /// sees what the model is about to receive.
+    /// Short human-readable summary ("attached: 1 image, 2 files") of
+    /// everything that got attached, including the happy-path items.
+    /// Useful for tests + debugging; the live UI uses `issues` instead
+    /// so a successful submit doesn't clutter the transcript with a
+    /// redundant confirmation line.
     let summary: String?
+    /// Subset of `summary` that the user **needs to know about**:
+    /// missing paths, images that couldn't be sent because the model
+    /// is text-only. Nil when every attachment resolved cleanly, so
+    /// callers can branch on non-nil == "something worth flagging".
+    let issues: String?
 }
 
 @MainActor
@@ -412,7 +419,21 @@ func buildPromptWithAttachments(
     }
     let summary = parts.isEmpty ? nil : "attached: " + parts.joined(separator: ", ")
 
-    return BuiltPrompt(text: out, images: images, summary: summary)
+    // `issues` is the strict subset users care about once the message
+    // is in flight: what *didn't* make it as-intended. Happy-path
+    // attachments aren't surfaced because the typed message already
+    // carries the @path / [image #N] tokens — the user doesn't need
+    // a confirmation that their input was parsed.
+    var issueParts: [String] = []
+    if counts.missing > 0 {
+        issueParts.append("\(counts.missing) missing path\(counts.missing == 1 ? "" : "s")")
+    }
+    if counts.skippedImage > 0 {
+        issueParts.append("\(counts.skippedImage) image skipped (text-only model)")
+    }
+    let issues = issueParts.isEmpty ? nil : issueParts.joined(separator: ", ")
+
+    return BuiltPrompt(text: out, images: images, summary: summary, issues: issues)
 }
 
 private func xmlEscape(_ s: String) -> String {

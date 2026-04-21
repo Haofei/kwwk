@@ -12,6 +12,7 @@ public struct AgentInitialState: Sendable {
     public var systemPrompt: String
     public var model: Model
     public var thinkingLevel: ThinkingLevel
+    public var thinkingDisplay: ThinkingDisplay
     public var tools: [AgentTool]
     public var messages: [Message]
 
@@ -19,12 +20,14 @@ public struct AgentInitialState: Sendable {
         systemPrompt: String = "",
         model: Model,
         thinkingLevel: ThinkingLevel = .off,
+        thinkingDisplay: ThinkingDisplay = .collapsed,
         tools: [AgentTool] = [],
         messages: [Message] = []
     ) {
         self.systemPrompt = systemPrompt
         self.model = model
         self.thinkingLevel = thinkingLevel
+        self.thinkingDisplay = thinkingDisplay
         self.tools = tools
         self.messages = messages
     }
@@ -35,6 +38,8 @@ public enum AgentError: Error, Equatable {
     case cannotContinueFromRole(String)
     case alreadyRunning
     case listenerOutsideActiveRun
+    case maxRetriesExceeded
+    case aborted
 }
 
 public struct AgentOptions: Sendable {
@@ -48,8 +53,11 @@ public struct AgentOptions: Sendable {
     public var sessionId: String?
     public var thinkingBudgets: ThinkingBudgets?
     public var maxRetryDelayMs: Int?
+    /// Hard cap on assistant turns per run. Nil = unlimited.
+    public var maxTurns: Int?
     public var beforeToolCall: BeforeToolCallHook?
     public var afterToolCall: AfterToolCallHook?
+    public var userPromptSubmit: UserPromptSubmitHook?
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
     public var apiKeyResolver: (@Sendable (String) async -> String?)?
@@ -65,8 +73,10 @@ public struct AgentOptions: Sendable {
         sessionId: String? = nil,
         thinkingBudgets: ThinkingBudgets? = nil,
         maxRetryDelayMs: Int? = nil,
+        maxTurns: Int? = nil,
         beforeToolCall: BeforeToolCallHook? = nil,
         afterToolCall: AfterToolCallHook? = nil,
+        userPromptSubmit: UserPromptSubmitHook? = nil,
         convertToLlm: ConvertToLlmHook? = nil,
         transformContext: TransformContextHook? = nil,
         apiKeyResolver: (@Sendable (String) async -> String?)? = nil
@@ -81,8 +91,10 @@ public struct AgentOptions: Sendable {
         self.sessionId = sessionId
         self.thinkingBudgets = thinkingBudgets
         self.maxRetryDelayMs = maxRetryDelayMs
+        self.maxTurns = maxTurns
         self.beforeToolCall = beforeToolCall
         self.afterToolCall = afterToolCall
+        self.userPromptSubmit = userPromptSubmit
         self.convertToLlm = convertToLlm
         self.transformContext = transformContext
         self.apiKeyResolver = apiKeyResolver
@@ -103,14 +115,20 @@ public final class Agent: @unchecked Sendable {
     public var sessionId: String?
     public var thinkingBudgets: ThinkingBudgets?
     public var maxRetryDelayMs: Int?
+    public var maxTurns: Int?
     public var toolExecution: ToolExecutionMode
     public var toolChoice: ToolChoice?
     public var parallelToolCalls: Bool?
     public var beforeToolCall: BeforeToolCallHook?
     public var afterToolCall: AfterToolCallHook?
+    public var userPromptSubmit: UserPromptSubmitHook?
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
     public var apiKeyResolver: (@Sendable (String) async -> String?)?
+
+    /// Base delay (ms) used for exponential backoff between stream retries.
+    /// Exposed internally so tests can shrink the 1-second default.
+    internal var retryBaseDelayMs: UInt64 = 1_000
 
     private let steeringQueue: PendingMessageQueue
     private let followUpQueue: PendingMessageQueue
@@ -138,6 +156,7 @@ public final class Agent: @unchecked Sendable {
             systemPrompt: options.initialState.systemPrompt,
             model: options.initialState.model,
             thinkingLevel: options.initialState.thinkingLevel,
+            thinkingDisplay: options.initialState.thinkingDisplay,
             tools: options.initialState.tools,
             messages: options.initialState.messages
         )
@@ -150,8 +169,10 @@ public final class Agent: @unchecked Sendable {
         self.sessionId = options.sessionId
         self.thinkingBudgets = options.thinkingBudgets
         self.maxRetryDelayMs = options.maxRetryDelayMs
+        self.maxTurns = options.maxTurns
         self.beforeToolCall = options.beforeToolCall
         self.afterToolCall = options.afterToolCall
+        self.userPromptSubmit = options.userPromptSubmit
         self.convertToLlm = options.convertToLlm
         self.transformContext = options.transformContext
         self.apiKeyResolver = options.apiKeyResolver
@@ -336,15 +357,26 @@ extension Agent {
         let steering = steeringQueue
         let followUp = followUpQueue
         let skipBox = FlagBox(initial: skipInitialSteeringPoll)
+        // Filter reasoning intent by the live model's capability. Non-
+        // reasoning models (e.g. Copilot GPT-4.1) would otherwise receive
+        // a `reasoning`/`thinking` field they don't understand — some
+        // endpoints 400 on unknown params. Users set the level via
+        // `/thinking`; we just gate whether to forward it.
+        let effectiveReasoning: ReasoningLevel? = {
+            guard state.model.reasoning, state.thinkingLevel != .off else { return nil }
+            return thinkingLevelToReasoning(state.thinkingLevel)
+        }()
         return AgentLoopConfig(
             model: state.model,
-            reasoning: state.thinkingLevel == .off ? nil : thinkingLevelToReasoning(state.thinkingLevel),
+            reasoning: effectiveReasoning,
             thinkingBudgets: thinkingBudgets,
             sessionId: sessionId,
             maxRetryDelayMs: maxRetryDelayMs,
             toolExecution: toolExecution,
             toolChoice: toolChoice,
             parallelToolCalls: parallelToolCalls,
+            maxTurns: maxTurns,
+            retryBaseDelayMs: retryBaseDelayMs,
             getSteeringMessages: {
                 if skipBox.swapFalse() { return [] }
                 return steering.drain()
@@ -353,6 +385,7 @@ extension Agent {
             apiKeyResolver: apiKeyResolver,
             beforeToolCall: beforeToolCall,
             afterToolCall: afterToolCall,
+            userPromptSubmit: userPromptSubmit,
             convertToLlm: convertToLlm,
             transformContext: transformContext
         )
@@ -421,8 +454,25 @@ extension Agent {
         state.setErrorMessage(failure.errorMessage)
         let cancellation = lock.withLock { activeCancellation }
         let listeners = snapshotListeners()
+        // Emit the synthetic failure as a normal message pair so
+        // transcript renderers show it as `✗ err` instead of silently
+        // vanishing — this is the "retries exhausted via thrown error"
+        // path that previously left the TUI blank.
+        //
+        // The summary on this path is minimal: the failure carries no
+        // usage so we emit zero tokens/cost. Consumers can branch on
+        // `finalStopReason == .error / .aborted` to render accordingly.
+        let summary = AgentRunSummary(
+            turns: 0,
+            usage: Usage(),
+            cost: Cost(),
+            durationMs: 0,
+            finalStopReason: aborted ? .aborted : .error
+        )
         for listener in listeners {
-            await listener(.agentEnd(messages: [.assistant(failure)]), cancellation)
+            await listener(.messageStart(message: .assistant(failure)), cancellation)
+            await listener(.messageEnd(message: .assistant(failure)), cancellation)
+            await listener(.agentEnd(messages: [.assistant(failure)], summary: summary), cancellation)
         }
     }
 

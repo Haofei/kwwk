@@ -23,13 +23,19 @@ func registerBuiltinSlashCommands(_ registry: SlashCommandRegistry) {
         handler: handleQueueCommand
     ))
     registry.register(SlashCommand(
+        name: "thinking",
+        description: "Show / set thinking level (off|minimal|low|medium|high|xhigh) or display (show|hide)",
+        handler: handleThinkingCommand
+    ))
+    registry.register(SlashCommand(
         name: "help",
         description: "List available slash commands",
         handler: { ctx, _ in
-            ctx.notify(Style.dimmed("  available slash commands:"))
+            var lines = [Style.dimmed("  available slash commands:")]
             for cmd in registry.all {
-                ctx.notify(Style.dimmed("    /\(cmd.name) — \(cmd.description)"))
+                lines.append(Style.dimmed("    /\(cmd.name) — \(cmd.description)"))
             }
+            ctx.notifyBlock(lines)
         }
     ))
 }
@@ -59,19 +65,19 @@ private func handleModelCommand(_ ctx: SlashContext, _ args: String) async {
         title: "Select a model  (provider: \(agentProvider))",
         models: available,
         currentModelId: current.id,
-        onSelect: { [agent = ctx.agent, notify = ctx.notify, modal = ctx.modal] picked in
+        onSelect: { [agent = ctx.agent, notifyBlock = ctx.notifyBlock, modal = ctx.modal] picked in
             let rebuilt = adoptFields(from: current, into: picked)
             agent.state.model = rebuilt
             modal.close()
             if picked.id == current.id {
-                notify(Style.dimmed("  /model: already on \(picked.id)"))
+                notifyBlock([Style.dimmed("  /model: already on \(picked.id)")])
             } else {
-                notify(Style.dimmed("  /model: switched \(current.id) → \(picked.id)"))
+                notifyBlock([Style.dimmed("  /model: switched \(current.id) → \(picked.id)")])
             }
         },
-        onCancel: { [modal = ctx.modal, notify = ctx.notify] in
+        onCancel: { [modal = ctx.modal, notifyBlock = ctx.notifyBlock] in
             modal.close()
-            notify(Style.dimmed("  /model: cancelled"))
+            notifyBlock([Style.dimmed("  /model: cancelled")])
         }
     )
     ctx.modal.open(modal)
@@ -89,21 +95,52 @@ func catalogProviderKey(forAgentProvider provider: String) -> String {
     }
 }
 
-/// Carry the current-session provider routing (api string, baseUrl, any
-/// custom headers) over from the old model onto the newly-selected one.
-/// The catalog lists models by their canonical provider (`openai-codex`),
-/// but the live agent uses a provider-variant routing key
-/// (`chatgpt-codex`, the Codex endpoint we registered at startup). Without
-/// this copy the first request after a switch would hit the wrong
-/// `APIRegistry` entry or try to call the canonical OpenAI endpoint that
-/// we never registered a token for.
+/// Merge routing info from the current live session onto `picked`. Two
+/// regimes:
+///
+///   - **Same provider** (`current.provider == picked.provider`): the
+///     catalog entry already carries the correct wire api, baseUrl, and
+///     headers — e.g. Copilot models vary per-model across
+///     openai-completions / anthropic-messages / openai-responses, and
+///     we registered all three variants at login. Just take `picked`
+///     as-is.
+///   - **Variant-routed provider** (Codex): catalog lists models under
+///     `openai-codex` but we registered the live provider under the
+///     variant key `chatgpt-codex`. Carry `current`'s routing across so
+///     the first request after a switch doesn't hit the canonical
+///     endpoint we never registered a token for. Also preserves the
+///     Codex-specific `maxTokens == 0` sentinel (do not emit
+///     `max_output_tokens`).
+///
 /// Internal (not private) so regression tests can pin the sentinel logic.
 func adoptFields(from current: Model, into picked: Model) -> Model {
-    // `maxTokens = 0` is a sentinel used by AuthResolver for Codex ("do
-    // not emit max_output_tokens — the endpoint rejects it"). Preserve
-    // the sentinel when switching inside the Codex provider; otherwise
-    // adopt the picked model's real cap so we don't leak an unrelated
-    // model's limit onto the new request.
+    if current.provider == picked.provider {
+        // Same provider — adopt picked's identity, wire (api), and
+        // capabilities, but keep the session's `baseUrl`. The session
+        // baseUrl carries two things the catalog doesn't:
+        //   - Enterprise / Business Copilot's proxy host (refreshed
+        //     from the session token's `endpoints.api` claim)
+        //   - A user-supplied custom host for `openai-compatible` or
+        //     `anthropic-api-key` / `openai-api-key` logins
+        // The catalog entry's `baseUrl` is the canonical upstream
+        // (`https://api.openai.com/v1`, etc.), which can round-trip
+        // into double-`/v1` when our providers append their own
+        // suffix. Holding the session value is both correct and
+        // defensive.
+        return Model(
+            id: picked.id,
+            name: picked.name,
+            api: picked.api,
+            provider: picked.provider,
+            baseUrl: current.baseUrl,
+            reasoning: picked.reasoning,
+            input: picked.input,
+            cost: picked.cost,
+            contextWindow: picked.contextWindow,
+            maxTokens: picked.maxTokens,
+            headers: picked.headers
+        )
+    }
     let resolvedMaxTokens = current.maxTokens == 0 ? 0 : picked.maxTokens
     return Model(
         id: picked.id,
@@ -118,6 +155,83 @@ func adoptFields(from current: Model, into picked: Model) -> Model {
         maxTokens: resolvedMaxTokens,
         headers: current.headers
     )
+}
+
+// MARK: - /thinking
+
+/// `/thinking` (no args) — show current level.
+/// `/thinking off|minimal|low|medium|high|xhigh` — set it.
+///
+/// Extended thinking is auto-enabled at `.medium` on startup for
+/// reasoning-capable models so users see `[thinking]` blocks without
+/// flipping a switch. This command is the escape hatch: turn it off for
+/// latency, crank to `.high` on thorny problems. No catalog-capability
+/// check — providers that don't understand the level silently ignore it,
+/// so the worst case is a no-op.
+@MainActor
+private func handleThinkingCommand(_ ctx: SlashContext, _ args: String) async {
+    let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if trimmed.isEmpty {
+        let level = ctx.agent.state.thinkingLevel
+        let display = ctx.agent.state.thinkingDisplay
+        let model = ctx.agent.state.model
+        var lines = [Style.dimmed("  /thinking: level=\(level.rawValue)  display=\(display.rawValue)")]
+        if level != .off && !model.reasoning {
+            lines.append(Style.dimmed("    (current model \(model.id) is non-reasoning — level stored but won't be sent until `/model` switch)"))
+        }
+        lines.append(Style.dimmed("    level: off, minimal, low, medium, high, xhigh"))
+        lines.append(Style.dimmed("    display: show, hide"))
+        ctx.notifyBlock(lines)
+        return
+    }
+    if let display = parseThinkingDisplay(trimmed) {
+        let previous = ctx.agent.state.thinkingDisplay
+        ctx.agent.state.thinkingDisplay = display
+        if previous == display {
+            ctx.notify(Style.dimmed("  /thinking: display already \(display.rawValue)"))
+        } else {
+            ctx.notify(Style.dimmed("  /thinking: display \(previous.rawValue) → \(display.rawValue)"))
+            ctx.refreshTranscript()
+        }
+        return
+    }
+    guard let level = parseThinkingLevel(trimmed) else {
+        ctx.notify(Style.error("  /thinking: unknown arg '\(args)'. Levels: off|minimal|low|medium|high|xhigh. Display: show|hide"))
+        return
+    }
+    let previous = ctx.agent.state.thinkingLevel
+    ctx.agent.state.thinkingLevel = level
+    let model = ctx.agent.state.model
+    var lines: [String] = []
+    if previous == level {
+        lines.append(Style.dimmed("  /thinking: already \(level.rawValue)"))
+    } else {
+        lines.append(Style.dimmed("  /thinking: \(previous.rawValue) → \(level.rawValue)"))
+    }
+    if level != .off && !model.reasoning {
+        lines.append(Style.dimmed("    (current model \(model.id) is non-reasoning — level saved; will apply after `/model` to a reasoning-capable one)"))
+    }
+    ctx.notifyBlock(lines)
+}
+
+private func parseThinkingLevel(_ s: String) -> ThinkingLevel? {
+    switch s {
+    case "off": return .off
+    case "minimal": return .minimal
+    case "low": return .low
+    case "medium", "med": return .medium
+    case "high": return .high
+    case "xhigh", "x-high", "max": return .xhigh
+    default: return nil
+    }
+}
+
+private func parseThinkingDisplay(_ s: String) -> ThinkingDisplay? {
+    switch s {
+    case "show", "expand", "expanded", "full": return .expanded
+    case "hide", "collapse", "collapsed", "brief": return .collapsed
+    default: return nil
+    }
 }
 
 // MARK: - /queue
@@ -144,12 +258,13 @@ private func handleQueueCommand(_ ctx: SlashContext, _ args: String) async {
             ctx.notify(Style.dimmed("  /queue: nothing queued"))
             return
         }
-        ctx.notify(Style.dimmed("  /queue: \(messages.count) waiting for the next turn boundary"))
+        var lines = [Style.dimmed("  /queue: \(messages.count) waiting for the next turn boundary")]
         for (i, msg) in messages.enumerated() {
             let body = previewQueuedMessage(msg)
-            ctx.notify(Style.dimmed("    \(i + 1). \(body)"))
+            lines.append(Style.dimmed("    \(i + 1). \(body)"))
         }
-        ctx.notify(Style.dimmed("    (use /queue clear to drop them)"))
+        lines.append(Style.dimmed("    (use /queue clear to drop them)"))
+        ctx.notifyBlock(lines)
     default:
         ctx.notify(Style.error("  /queue: unknown arg '\(args)'. Try /queue or /queue clear"))
     }
@@ -182,11 +297,6 @@ private func previewQueuedMessage(_ msg: Message, max: Int = 80) -> String {
 /// entry points produce bit-identical recap messages.
 @MainActor
 private func handleCompactCommand(_ ctx: SlashContext, _ args: String) async {
-    let snapshot = ctx.agent.state.messages
-    if !ctx.agent.state.isStreaming && snapshot.count >= compactMinMessages {
-        ctx.notify(Style.dimmed("  /compact: summarizing \(snapshot.count) messages…"))
-    }
-
     let outcome = await performCompact(
         agent: ctx.agent,
         backgroundManager: ctx.backgroundManager,
@@ -199,9 +309,16 @@ private func handleCompactCommand(_ ctx: SlashContext, _ args: String) async {
     case .refusedTooFewMessages(let count):
         ctx.notify(Style.dimmed("  /compact: only \(count) message(s); nothing to compact"))
     case .compacted(let n, let hasLedger):
-        var note = "  /compact: compacted \(n) messages → 1 recap"
-        if hasLedger { note += " (+ running-task ledger)" }
-        ctx.notify(Style.prompt(note))
+        // Show a compact record + durable boundary so the user can
+        // scroll up later and see where the compact happened.
+        ctx.notify(Style.dimmed("  /compact: summarizing \(n) messages…"))
+        ctx.commitScrollback { width in
+            renderCompactBoundary(
+                messagesCompacted: n,
+                hasRunningTasksLedger: hasLedger,
+                width: width
+            )
+        }
     case .failed(let msg):
         ctx.notify(Style.error("  /compact: \(msg)"))
     }

@@ -84,15 +84,18 @@ struct BgNotificationSummaryTests {
         """
         let summary = BgNotificationSummary.parse(text)!
         let lines = summary.render()
-        #expect(lines.count >= 2, "expected header + at least one body line, got \(lines)")
+        // Leading blank + header + body (no trailing blank under the
+        // "open with a separator, never close with one" rule).
+        #expect(lines.count >= 3, "expected leading blank + header + body, got \(lines)")
+        #expect(lines.first == "")
         // Header: starts with ● and mentions label + status.
-        let header = lines[0]
+        let header = lines[1]
         #expect(header.contains("bg(echo)"))
         #expect(header.contains("completed"))
         #expect(header.contains("exit 0"))
         #expect(header.contains("5ms"))
         // Body: one `⎿` line with "hi".
-        let body = lines.dropFirst().joined()
+        let body = lines.dropFirst(2).joined()
         #expect(body.contains("⎿"))
         #expect(body.contains("hi"))
     }
@@ -114,8 +117,9 @@ struct BgNotificationSummaryTests {
         """
         let summary = BgNotificationSummary.parse(text)!
         let lines = summary.render()
-        // 1 header + 4 preview + 1 "more lines" = 6 lines.
-        #expect(lines.count == 6)
+        // 1 leading blank + 1 header + 4 preview + 1 "more lines" = 7.
+        // No trailing blank under the block-separator convention.
+        #expect(lines.count == 7)
         #expect(lines.last?.contains("8 more") == true)
     }
 }

@@ -163,15 +163,3 @@ struct AgentBackgroundTests {
         #expect(!hasNotif)
     }
 }
-
-private func awaitUntil(
-    _ budgetMs: Int,
-    _ predicate: @Sendable () async -> Bool
-) async -> Bool {
-    let start = Date()
-    while Date().timeIntervalSince(start) * 1000 < Double(budgetMs) {
-        if await predicate() { return true }
-        try? await Task.sleep(nanoseconds: 10_000_000)
-    }
-    return false
-}

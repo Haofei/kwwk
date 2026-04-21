@@ -15,8 +15,8 @@ public enum KWWK {
     ///      at `kwwk login`.
     ///
     /// `tools` controls which coding tools the agent is given. Default is
-    /// `.all` (read/write/edit/bash/grep/find/ls/bg_status + optional tmux).
-    /// Pass `.readOnly` for a sandboxed reviewer-style agent.
+    /// `.all` — read/write/edit/bash/grep/find/ls/task_status/wait_task +
+    /// optional tmux. Pass `.readOnly` for a sandboxed reviewer-style agent.
     ///
     /// `autoCompactThreshold` fires a silent `/compact` (summarize the
     /// transcript → replace with a recap) once the turn's reported

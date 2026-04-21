@@ -139,40 +139,120 @@ public enum ProviderVariants {
     public static func githubCopilot(
         sessionToken: String? = nil,
         client: HTTPClient = URLSessionHTTPClient(),
-        integrationID: String = "kw"
+        integrationID: String = "vscode-chat",
+        api: String = "openai-completions",
+        baseURL: URL = URL(string: "https://api.githubcopilot.com")!
     ) -> OpenAICompletionsProvider {
-        OpenAICompletionsProvider(
-            api: "github-copilot-chat",
+        let baseString = baseURL.absoluteString.trimmedSlashes
+        return OpenAICompletionsProvider(
+            api: api,
             client: client,
-            defaultBaseURL: URL(string: "https://api.githubcopilot.com")!,
+            defaultBaseURL: baseURL,
             defaultAPIKey: sessionToken,
-            extraHeaders: [
-                "editor-version": "kw/1.0",
-                "copilot-integration-id": integrationID,
-            ],
+            extraHeaders: copilotEditorHeaders(integrationID: integrationID),
             urlBuilder: { _, _, fallback in
-                URL(string: "https://api.githubcopilot.com/chat/completions") ?? fallback
+                URL(string: "\(baseString)/chat/completions") ?? fallback
             },
             authHeaderBuilder: { key in ["authorization": "Bearer \(key)"] },
-            headersDecorator: { headers, _, context, _ in
-                let hasImages = context.messages.contains { msg in
-                    if case .user(let u) = msg {
-                        return u.content.contains { if case .image = $0 { return true } else { return false } }
-                    }
-                    if case .toolResult(let t) = msg {
-                        return t.content.contains { if case .image = $0 { return true } else { return false } }
-                    }
-                    return false
-                }
-                let lastIsUser: Bool = {
-                    guard let last = context.messages.last else { return true }
-                    if case .user = last { return true } else { return false }
-                }()
-                headers["x-initiator"] = lastIsUser ? "user" : "agent"
-                headers["openai-intent"] = "conversation-edits"
-                if hasImages { headers["copilot-vision-request"] = "true" }
-            }
+            headersDecorator: copilotDynamicHeadersDecorator()
         )
+    }
+
+    // MARK: - GitHub Copilot (Anthropic Messages route)
+    //
+    // Claude-on-Copilot. Copilot proxies Claude's Messages API at the same
+    // host (`/v1/messages`) with Bearer session-token auth and the standard
+    // editor headers. No `anthropic-beta` opt-in; no per-request dynamic
+    // headers (pi doesn't stamp `X-Initiator` on this route).
+    public static func githubCopilotAnthropic(
+        sessionToken: String? = nil,
+        client: HTTPClient = URLSessionHTTPClient(),
+        integrationID: String = "vscode-chat",
+        api: String = "anthropic-messages",
+        baseURL: URL = URL(string: "https://api.individual.githubcopilot.com")!
+    ) -> AnthropicProvider {
+        // AnthropicProvider's default urlBuilder reads `model.baseUrl`,
+        // which the Copilot catalog pins to `api.individual.githubcopilot.com`
+        // — that would bypass the session's enterprise/business proxy
+        // endpoint. We can't inject a urlBuilder on AnthropicProvider, so
+        // `defaultBaseURL` is the fallback when `model.baseUrl.isEmpty`.
+        // Callers who need enterprise routing should normalize
+        // `model.baseUrl` via `adoptFields` on `/model` switches, which
+        // keeps the session baseUrl across catalog swaps.
+        AnthropicProvider(
+            api: api,
+            client: client,
+            defaultBaseURL: baseURL,
+            defaultAPIKey: sessionToken,
+            extraHeaders: copilotEditorHeaders(integrationID: integrationID),
+            authHeaderBuilder: { key in ["authorization": "Bearer \(key)"] }
+        )
+    }
+
+    // MARK: - GitHub Copilot (OpenAI Responses route)
+    //
+    // GPT-5 family runs on the Responses wire over Copilot's proxy. Same
+    // auth + editor headers as the completions/anthropic variants. The
+    // default Responses URL (`{base}/v1/responses`) matches what Copilot
+    // accepts.
+    public static func githubCopilotResponses(
+        sessionToken: String? = nil,
+        client: HTTPClient = URLSessionHTTPClient(),
+        integrationID: String = "vscode-chat",
+        api: String = "openai-responses",
+        baseURL: URL = URL(string: "https://api.individual.githubcopilot.com")!
+    ) -> OpenAIResponsesProvider {
+        let baseString = baseURL.absoluteString.trimmedSlashes
+        return OpenAIResponsesProvider(
+            api: api,
+            client: client,
+            defaultBaseURL: baseURL,
+            defaultAPIKey: sessionToken,
+            extraHeaders: copilotEditorHeaders(integrationID: integrationID),
+            // Pin the URL to the session's Copilot endpoint. Catalog
+            // Copilot-GPT-5 entries hardcode
+            // `api.individual.githubcopilot.com`; without pinning, a
+            // Business/Enterprise account loses its proxy host.
+            urlBuilder: { _, _, _ in
+                URL(string: "\(baseString)/responses")
+                    ?? URL(string: "https://api.individual.githubcopilot.com/responses")!
+            },
+            authHeaderBuilder: { key in ["authorization": "Bearer \(key)"] }
+        )
+    }
+
+    // MARK: - Shared helpers
+
+    private static func copilotEditorHeaders(integrationID: String) -> [String: String] {
+        [
+            "editor-version": "vscode/1.107.0",
+            "editor-plugin-version": "copilot-chat/0.35.0",
+            "user-agent": "GitHubCopilotChat/0.35.0",
+            "copilot-integration-id": integrationID,
+        ]
+    }
+
+    private static func copilotDynamicHeadersDecorator() -> (
+        @Sendable (inout [String: String], Model, Context, StreamOptions?) -> Void
+    ) {
+        return { headers, _, context, _ in
+            let hasImages = context.messages.contains { msg in
+                if case .user(let u) = msg {
+                    return u.content.contains { if case .image = $0 { return true } else { return false } }
+                }
+                if case .toolResult(let t) = msg {
+                    return t.content.contains { if case .image = $0 { return true } else { return false } }
+                }
+                return false
+            }
+            let lastIsUser: Bool = {
+                guard let last = context.messages.last else { return true }
+                if case .user = last { return true } else { return false }
+            }()
+            headers["x-initiator"] = lastIsUser ? "user" : "agent"
+            headers["openai-intent"] = "conversation-edits"
+            if hasImages { headers["copilot-vision-request"] = "true" }
+        }
     }
 }
 

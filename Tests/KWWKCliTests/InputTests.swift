@@ -48,6 +48,67 @@ struct InputComponentTests {
         let line = input.render(width: 40).first ?? ""
         #expect(line.contains(CURSOR_MARKER))
     }
+
+    @Test("soft-wraps content that exceeds the render width") func softWrap() {
+        let input = InputComponent(initial: "abcdefghij")
+        let rows = input.render(width: 3)
+        // 10 chars / 3 cols = 4 visual rows (last is 1 char).
+        #expect(rows.count == 4)
+        #expect(rows[0] == "abc")
+        #expect(rows[1] == "def")
+        #expect(rows[2] == "ghi")
+        #expect(rows[3] == "j")
+    }
+
+    @Test("literal \\n in buffer forces a hard break") func hardNewline() {
+        let input = InputComponent(initial: "hi\nthere")
+        let rows = input.render(width: 40)
+        #expect(rows == ["hi", "there"])
+    }
+
+    @Test("Ctrl+J inserts a newline into the buffer") func ctrlJInsertsNewline() {
+        let input = InputComponent(initial: "ab")
+        // 0x0A is Ctrl+J (raw LF). Fires without any keyboard-protocol
+        // support — works in every terminal.
+        input.handleInput("\u{0A}")
+        #expect(input.value == "ab\n")
+        #expect(input.cursor == 3)
+    }
+
+    @Test("Alt+Enter inserts a newline") func altEnterInsertsNewline() {
+        let input = InputComponent(initial: "ab")
+        // ESC + CR == alt+enter in the parser.
+        input.handleInput("\u{1B}\r")
+        #expect(input.value == "ab\n")
+    }
+
+    @Test("Shift+Enter inserts a newline") func shiftEnterInsertsNewline() {
+        let input = InputComponent(initial: "ab")
+        // Kitty keyboard protocol: CSI 13 ; 2 u == shift+enter.
+        input.handleInput("\u{1B}[13;2u")
+        #expect(input.value == "ab\n")
+    }
+
+    @Test("cursor placed on the correct visual row after a hard break") func cursorMultiRow() {
+        let input = InputComponent(initial: "hi\nx")
+        input.focused = true
+        // cursor is at end (index 4 == after "hi\nx")
+        let rows = input.render(width: 40)
+        #expect(rows.count == 2)
+        #expect(!rows[0].contains(CURSOR_MARKER), "cursor should be on row 1 (the 'x' row), not row 0")
+        #expect(rows[1].contains(CURSOR_MARKER))
+    }
+}
+
+@Suite("Keybinding matching")
+struct KeybindingTests {
+    @Test("plain Enter binding does not match Shift+Enter") func enterBindingRejectsShift() {
+        let binding = KeyBinding("enter", shift: false)
+        let plainEnter = KeyEvent(name: "enter")
+        let shiftEnter = KeyEvent(name: "enter", shift: true)
+        #expect(binding.matches(plainEnter) == true)
+        #expect(binding.matches(shiftEnter) == false)
+    }
 }
 
 @Suite("Markdown component")

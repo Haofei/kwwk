@@ -44,20 +44,51 @@ final class SlashContext {
     let modal: ModalHost
     let backgroundManager: BackgroundTaskManager
     let sessionId: String
-    let notify: @MainActor (String) -> Void
+    /// Append one semantic block of dimmed notification text to the
+    /// transcript. All lines in the array are committed together with a
+    /// single leading blank row (the "every scrollback block opens with
+    /// a blank, never closes with one" rule) — so a multi-line
+    /// notification stays visually grouped instead of stacking blanks
+    /// between every line. Single-line notifications can use the
+    /// `notify(_:String)` convenience overload below.
+    let notifyBlock: @MainActor ([String]) -> Void
+    /// Emit lines into the TUI's commit buffer so they flow into the
+    /// terminal's native scrollback as permanent records. Use when the
+    /// command produced a durable outcome worth keeping in history
+    /// (e.g. a `/compact` boundary). The closure takes the terminal's
+    /// current width so callers can render width-aware rules/banners
+    /// without needing to plumb the terminal itself.
+    let commitScrollback: @MainActor (_ render: (_ width: Int) -> [String]) -> Void
+    /// Recompute the streaming transcript and request a repaint. Used by
+    /// commands that change a rendering-affecting piece of agent state
+    /// (e.g. `/thinking show|hide`) without emitting an AgentEvent the
+    /// listener would otherwise observe.
+    let refreshTranscript: @MainActor () -> Void
 
     init(
         agent: Agent,
         modal: ModalHost,
         backgroundManager: BackgroundTaskManager,
         sessionId: String,
-        notify: @MainActor @escaping (String) -> Void
+        notifyBlock: @MainActor @escaping ([String]) -> Void,
+        commitScrollback: @MainActor @escaping ((Int) -> [String]) -> Void,
+        refreshTranscript: @MainActor @escaping () -> Void
     ) {
         self.agent = agent
         self.modal = modal
         self.backgroundManager = backgroundManager
         self.sessionId = sessionId
-        self.notify = notify
+        self.notifyBlock = notifyBlock
+        self.commitScrollback = commitScrollback
+        self.refreshTranscript = refreshTranscript
+    }
+
+    /// Single-line convenience: one-off status messages (`/model switched
+    /// A → B`) stay ergonomic. Internally treated as a one-line block so
+    /// the leading-blank rule still applies.
+    @MainActor
+    func notify(_ line: String) {
+        notifyBlock([line])
     }
 }
 

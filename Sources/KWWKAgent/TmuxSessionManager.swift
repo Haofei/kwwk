@@ -1,6 +1,8 @@
 import Foundation
 import KWWKAI
 
+#if os(macOS)
+
 /// Manages an isolated tmux server for running interactive TUI programs the
 /// agent can drive via `send_keys` and observe via `capture_pane`. Every kw
 /// process gets its own socket (`kw-<PID>`) so we don't reach into the user's
@@ -72,7 +74,12 @@ public actor TmuxSessionManager {
         let wd = workDir.flatMap { URL(fileURLWithPath: $0).path }
         let paneName = sanitizeName(name ?? deriveName(from: command))
 
-        if !sessionStarted {
+        // Don't trust the in-memory `sessionStarted` flag — the tmux session
+        // may have been auto-destroyed when its last window was killed, or
+        // the server may have been torn down externally. Query tmux directly.
+        let hasSession = runTmuxSync(args: ["has-session", "-t", sessionName]).exitCode == 0
+
+        if !hasSession {
             var args: [String] = ["new-session", "-d", "-s", sessionName, "-n", paneName]
             if let wd { args.append(contentsOf: ["-c", wd]) }
             args.append(contentsOf: ["-P", "-F", "#{pane_id}", command])
@@ -85,7 +92,12 @@ public actor TmuxSessionManager {
             return registerPane(paneId: paneId, name: paneName, command: command, workDir: wd)
         }
 
-        var args: [String] = ["new-window", "-t", sessionName, "-n", paneName]
+        // `-a` creates the window *after* the current window; `-t session:`
+        // targets the session (the trailing colon disambiguates session vs
+        // window). Without `-a`, tmux treats `-t session` as a *window*
+        // target and tries to replace window index 0, which fails with
+        // "index 0 in use" when a window already exists.
+        var args: [String] = ["new-window", "-a", "-t", "\(sessionName):", "-n", paneName]
         if let wd { args.append(contentsOf: ["-c", wd]) }
         args.append(contentsOf: ["-P", "-F", "#{pane_id}", command])
         let result = runTmuxSync(args: args)
@@ -136,14 +148,72 @@ public actor TmuxSessionManager {
         return result.stdout
     }
 
-    /// Close the pane's containing window (and kill the process running in it).
-    public func killPane(_ paneId: String) throws {
+    /// Redirect all output from `paneId` into `file` via `pipe-pane`.
+    /// The file is created if it doesn't exist. Stops automatically when
+    /// the pane dies or when `pipePaneStop` is called.
+    public func pipePaneOutput(paneId: String, toFile file: URL) throws {
         try ensureAvailable()
-        let result = runTmuxSync(args: ["kill-window", "-t", paneId])
+        try? FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        // tmux passes this argument to /bin/sh, so spaces, quotes, and
+        // shell metacharacters in `file.path` (temp dirs, project paths
+        // with spaces, usernames like "John Smith") would corrupt the
+        // redirect target. Single-quote the path and escape any embedded
+        // single quotes the POSIX-safe way: `'` → `'\''`.
+        let quotedPath = "'" + file.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let cmd = "cat >> \(quotedPath)"
+        let result = runTmuxSync(args: ["pipe-pane", "-t", paneId, cmd])
         if result.exitCode != 0 {
             throw TmuxError.commandFailed(stderr: result.stderr, exitCode: Int(result.exitCode))
         }
+    }
+
+    /// Stop piping pane output (noop if nothing is piped).
+    public func pipePaneStop(_ paneId: String) {
+        _ = runTmuxSync(args: ["pipe-pane", "-t", paneId])
+    }
+
+    /// Returns `true` when the pane has exited (or no longer exists).
+    public func isPaneDead(_ paneId: String) -> Bool {
+        let result = runTmuxSync(args: ["display-message", "-p", "-t", paneId, "#{pane_dead}"])
+        let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        // "1" = dead; "0" = alive. If the pane was killed externally the
+        // target may vanish and tmux returns an error — treat that as dead.
+        if result.exitCode != 0 { return true }
+        return trimmed == "1"
+    }
+
+    /// Exit status of the pane's last process, or `nil` if unavailable.
+    public func paneExitStatus(_ paneId: String) -> Int? {
+        let result = runTmuxSync(args: ["display-message", "-p", "-t", paneId, "#{pane_exit_status}"])
+        let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Int(trimmed)
+    }
+
+    /// Close the pane's containing window (and kill the process running in it).
+    /// Idempotent: if the pane/window is already gone (or the server has
+    /// already shut down), the call succeeds silently.
+    public func killPane(_ paneId: String) throws {
+        try ensureAvailable()
+        pipePaneStop(paneId)
+        let result = runTmuxSync(args: ["kill-window", "-t", paneId])
+        let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alreadyGone = stderr.hasPrefix("can't find")
+            || stderr.hasPrefix("no server running on")
+            || stderr.contains("not found")
+            || stderr.contains("no current target")
+        if result.exitCode != 0 && !alreadyGone {
+            throw TmuxError.commandFailed(stderr: result.stderr, exitCode: Int(result.exitCode))
+        }
         panes.removeValue(forKey: paneId)
+        // Tmux auto-destroys a session when its last window is killed, and
+        // the server when its last session is destroyed. Reset our tracking
+        // so the next `startPane` recreates the session.
+        if runTmuxSync(args: ["has-session", "-t", sessionName]).exitCode != 0 {
+            sessionStarted = false
+        }
     }
 
     /// All panes known to the manager (registered via `startPane`). Does not
@@ -281,3 +351,6 @@ private func deriveName(from command: String) -> String {
     let base = (first as NSString).lastPathComponent
     return base
 }
+
+#endif // os(macOS)
+

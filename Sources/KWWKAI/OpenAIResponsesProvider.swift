@@ -48,7 +48,10 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
         self.urlBuilder = urlBuilder ?? { model, _, fallback in
             var base = model.baseUrl.isEmpty ? fallback.absoluteString : model.baseUrl
             while base.hasSuffix("/") { base.removeLast() }
-            return URL(string: "\(base)/v1/responses") ?? fallback.appendingPathComponent("v1/responses")
+            // Tolerate catalog entries that bake `/v1` into baseUrl
+            // (pi-mono's models.generated.ts does this for OpenAI).
+            let versioned = base.hasSuffix("/v1") ? base : "\(base)/v1"
+            return URL(string: "\(versioned)/responses") ?? fallback.appendingPathComponent("v1/responses")
         }
         self.authHeaderBuilder = authHeaderBuilder ?? { key in ["authorization": "Bearer \(key)"] }
     }
@@ -330,7 +333,16 @@ public final class OpenAIResponsesProvider: APIProvider, @unchecked Sendable {
             }
         }
         if let reasoning = options?.reasoning {
-            root["reasoning"] = ["effort": reasoning.rawValue]
+            // `summary: auto` opts into reasoning-summary deltas on the
+            // stream (`response.reasoning_summary_text.delta`). Without
+            // it, the endpoint still runs internal reasoning for the
+            // requested `effort`, but the reasoning block streams as
+            // start → end with no body — so the UI has nothing to show
+            // under `[thinking]`.
+            root["reasoning"] = [
+                "effort": reasoning.rawValue,
+                "summary": "auto",
+            ]
         }
         if let meta = options?.metadata, let any = anyFromJSONValue(.object(meta)) {
             root["metadata"] = any

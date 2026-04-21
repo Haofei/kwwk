@@ -95,10 +95,24 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
                 url: url, method: "POST", headers: headers, body: body
             )
             if response.statusCode >= 400 {
+                // Drain the stream to surface the real error body — without
+                // this the user just sees "status 400" and has no signal
+                // whether it's the `thinking` field, max_tokens, or the
+                // Copilot proxy rejecting a shape. Trim to keep the
+                // notification readable; full body is still captured below.
+                var bodyBytes = Data()
+                for try await chunk in stream {
+                    bodyBytes.append(chunk)
+                    if bodyBytes.count > 4096 { break }
+                }
+                let bodyText = String(data: bodyBytes, encoding: .utf8) ?? ""
+                let preview = bodyText.isEmpty
+                    ? ""
+                    : " — " + bodyText.replacingOccurrences(of: "\n", with: " ").prefix(500)
                 let msg = Self.makeError(
                     model: model,
                     api: api,
-                    text: "Anthropic returned status \(response.statusCode)"
+                    text: "Anthropic returned status \(response.statusCode)\(preview)"
                 )
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
@@ -263,7 +277,25 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
             "stream": true,
             "max_tokens": options?.maxTokens ?? model.maxTokens,
         ]
-        if let temp = options?.temperature { root["temperature"] = temp }
+        // Extended thinking: Claude only returns `thinking` content blocks
+        // when the request body opts in via `thinking: {type, budget_tokens}`.
+        // When the caller requested a reasoning level, translate it to a
+        // token budget (via `ThinkingBudgets.budget(for:)` if supplied,
+        // else a sensible default per level). Temperature is deliberately
+        // dropped in this branch — the Messages API rejects any value
+        // other than 1.0 when thinking is enabled.
+        let thinkingEnabled: Bool
+        if let reasoning = options?.reasoning {
+            let budget = options?.thinkingBudgets?.budget(for: reasoning) ?? defaultThinkingBudget(for: reasoning)
+            root["thinking"] = [
+                "type": "enabled",
+                "budget_tokens": budget,
+            ]
+            thinkingEnabled = true
+        } else {
+            thinkingEnabled = false
+        }
+        if !thinkingEnabled, let temp = options?.temperature { root["temperature"] = temp }
         if let sys = context.systemPrompt, !sys.isEmpty { root["system"] = sys }
         if let tools = context.tools, !tools.isEmpty {
             root["tools"] = tools.map { tool -> [String: Any] in
@@ -286,6 +318,20 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
         }
         root["messages"] = context.messages.compactMap(encodeMessage)
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+    }
+
+    /// Fallback thinking budget per reasoning level when the caller didn't
+    /// supply explicit `ThinkingBudgets`. Anthropic requires a minimum of
+    /// 1024; these numbers are conservative enough to work across Claude
+    /// 4.x Sonnet/Haiku/Opus without tripping per-model caps.
+    private static func defaultThinkingBudget(for level: ReasoningLevel) -> Int {
+        switch level {
+        case .minimal: return 1024
+        case .low: return 2048
+        case .medium: return 8192
+        case .high: return 16_384
+        case .xhigh: return 24_576
+        }
     }
 
     private static func buildToolChoice(_ options: StreamOptions?) -> [String: Any]? {

@@ -59,7 +59,9 @@ struct BgNotificationSummary {
     func render() -> [String] {
         let header = renderHeader()
         let body = renderBody()
-        return [header] + body
+        // Leading blank, no trailing — matches the "every scrollback
+        // block opens with a separator, never closes with one" rule.
+        return [""] + [header] + body
     }
 
     private func renderHeader() -> String {

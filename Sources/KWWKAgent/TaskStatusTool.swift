@@ -14,7 +14,7 @@ import KWWKAI
 /// - `status`: detailed snapshot for one task, including the output file
 ///   path so the model can Read it for full output
 /// - `kill`: cancels a running task; no-op for terminal states
-public func createBgStatusTool(
+public func createTaskStatusTool(
     manager: BackgroundTaskManager,
     sessionId: String? = nil
 ) -> AgentTool {
@@ -35,14 +35,15 @@ public func createBgStatusTool(
     ])
 
     return AgentTool(
-        name: "bg_status",
-        label: "bg_status",
+        name: "task_status",
+        label: "task_status",
         description: "Inspect and manage background tasks. Use action=list to see all tasks for this session, action=status with task_id for details on a single task, or action=kill with task_id to terminate a running task.",
         parameters: parameters,
-        execute: { _, args, _, _ in
+        execute: { _, args, cancellation, _ in
+            try cancellation?.throwIfCancelled()
             guard case .object(let obj) = args,
                   case .string(let action) = obj["action"] ?? .null else {
-                throw CodingToolError.invalidArgument("bg_status: `action` is required")
+                throw CodingToolError.invalidArgument("task_status: `action` is required")
             }
             let taskId: String? = {
                 if case .string(let s) = obj["task_id"] ?? .null { return s }
@@ -88,7 +89,7 @@ public func createBgStatusTool(
 
             case "status":
                 guard let id = taskId else {
-                    throw CodingToolError.invalidArgument("bg_status: task_id is required for action=status")
+                    throw CodingToolError.invalidArgument("task_status: task_id is required for action=status")
                 }
                 guard let snap = await manager.get(id) else {
                     throw CodingToolError.invalidArgument("task not found: \(id)")
@@ -123,7 +124,7 @@ public func createBgStatusTool(
 
             case "kill":
                 guard let id = taskId else {
-                    throw CodingToolError.invalidArgument("bg_status: task_id is required for action=kill")
+                    throw CodingToolError.invalidArgument("task_status: task_id is required for action=kill")
                 }
                 guard let snap = await manager.get(id) else {
                     throw CodingToolError.invalidArgument("task not found: \(id)")
@@ -151,7 +152,7 @@ public func createBgStatusTool(
                 )
 
             default:
-                throw CodingToolError.invalidArgument("bg_status: unknown action \(action) (expected: list | status | kill)")
+                throw CodingToolError.invalidArgument("task_status: unknown action \(action) (expected: list | status | kill)")
             }
         }
     )

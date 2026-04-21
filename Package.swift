@@ -4,7 +4,9 @@ import PackageDescription
 let package = Package(
     name: "kwwk",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        .iOS(.v17),
+        .macCatalyst(.v17),
     ],
     products: [
         .library(name: "KWWKAI", targets: ["KWWKAI"]),

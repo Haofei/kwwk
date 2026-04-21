@@ -11,6 +11,19 @@ public enum ThinkingLevel: String, Sendable, Hashable {
     case xhigh
 }
 
+/// How the transcript UI should surface assistant thinking blocks. Orthogonal
+/// to `ThinkingLevel` (which controls what the provider is asked to
+/// produce) — this is purely a display preference.
+///
+///  - `collapsed` (default): show a one-line marker with elapsed time —
+///    `[thinking 2s…]` while in progress, `[thought for 3.4s]` once done.
+///    Tidier, keeps focus on the answer.
+///  - `expanded`: show the full thinking body dimmed inline.
+public enum ThinkingDisplay: String, Sendable, Hashable {
+    case collapsed
+    case expanded
+}
+
 /// Streaming function used by the agent loop. Implementations must encode all
 /// failures as stream events ending in an assistant message with stopReason
 /// `.error` or `.aborted` — never throw.
@@ -77,10 +90,49 @@ public struct AgentTool: Sendable {
     }
 }
 
+/// Per-run aggregate surfaced on `agentEnd`. Mirrors the SDK's
+/// `ResultMessage` — consumers (TUI, cost dashboards, audit logs) can
+/// read this once at the end of a run instead of re-deriving totals
+/// from the message delta.
+public struct AgentRunSummary: Sendable {
+    /// Number of assistant turns that actually streamed in this run.
+    /// Zero if the run was capped out before any request fired.
+    public var turns: Int
+    /// Summed token counts across every assistant message in this run.
+    /// `totalTokens` is the provider-reported sum where available,
+    /// otherwise the naive `input + output`.
+    public var usage: Usage
+    /// USD cost derived from `usage` and the configured model's
+    /// per-1M-token pricing. Zero for models without cost metadata.
+    public var cost: Cost
+    /// Wall-clock duration from `agentStart` to `agentEnd`, in ms.
+    public var durationMs: Int
+    /// Stop reason of the final assistant message in this run.
+    /// `.stop` for normal completion, `.aborted` on user cancel,
+    /// `.error` on retries-exhausted / turn-cap / synthetic failures,
+    /// or the provider's native reason. Nil if the run emitted no
+    /// assistant messages at all.
+    public var finalStopReason: StopReason?
+
+    public init(
+        turns: Int = 0,
+        usage: Usage = Usage(),
+        cost: Cost = Cost(),
+        durationMs: Int = 0,
+        finalStopReason: StopReason? = nil
+    ) {
+        self.turns = turns
+        self.usage = usage
+        self.cost = cost
+        self.durationMs = durationMs
+        self.finalStopReason = finalStopReason
+    }
+}
+
 /// Events emitted by the agent runtime. Mirrors pi-agent-core's AgentEvent.
 public enum AgentEvent: Sendable {
     case agentStart
-    case agentEnd(messages: [Message])
+    case agentEnd(messages: [Message], summary: AgentRunSummary)
 
     case turnStart
     case turnEnd(message: Message, toolResults: [ToolResultMessage])
@@ -92,6 +144,20 @@ public enum AgentEvent: Sendable {
     case toolExecutionStart(toolCallId: String, toolName: String, args: JSONValue)
     case toolExecutionUpdate(toolCallId: String, toolName: String, args: JSONValue, partialResult: AgentToolResult)
     case toolExecutionEnd(toolCallId: String, toolName: String, result: AgentToolResult, isError: Bool)
+
+    /// Emitted just before the agent loop sleeps to back off after a
+    /// retryable stream failure. `attempt` is zero-indexed and counts the
+    /// attempt that just failed (so `attempt: 0` means "first attempt failed,
+    /// retry #1 scheduled"). `delayMs` is the upcoming sleep duration.
+    case streamRetry(attempt: Int, delayMs: UInt64, reason: String)
+
+    /// Emitted during retry to tell the UI to discard any in-progress live
+    /// render for the current turn. The agent loop live-streams events so
+    /// the user sees tokens as they arrive; when a retryable error kills
+    /// the stream mid-flight, the partial text is no longer truthful and
+    /// the renderer must reset (not commit). The retried stream then
+    /// produces a fresh `messageStart` + updates.
+    case streamRewind
 
     public var type: String {
         switch self {
@@ -105,6 +171,8 @@ public enum AgentEvent: Sendable {
         case .toolExecutionStart: return "tool_execution_start"
         case .toolExecutionUpdate: return "tool_execution_update"
         case .toolExecutionEnd: return "tool_execution_end"
+        case .streamRetry: return "stream_retry"
+        case .streamRewind: return "stream_rewind"
         }
     }
 }
@@ -126,9 +194,16 @@ public struct BeforeToolCallContext: Sendable {
 public struct BeforeToolCallResult: Sendable {
     public var block: Bool
     public var reason: String?
-    public init(block: Bool = false, reason: String? = nil) {
+    /// Optional replacement for the tool's input args. When non-nil (and
+    /// `block` is false), the tool receives these args instead of the
+    /// ones the LLM emitted. Useful for auditing/sanitizing paths,
+    /// redacting secrets, or expanding shorthand — the hook speaks the
+    /// same JSON schema as the tool itself.
+    public var modifiedArgs: JSONValue?
+    public init(block: Bool = false, reason: String? = nil, modifiedArgs: JSONValue? = nil) {
         self.block = block
         self.reason = reason
+        self.modifiedArgs = modifiedArgs
     }
 }
 
@@ -154,6 +229,40 @@ public struct AfterToolCallResult: Sendable {
 
 public typealias BeforeToolCallHook = @Sendable (BeforeToolCallContext, CancellationHandle?) async -> BeforeToolCallResult?
 public typealias AfterToolCallHook = @Sendable (AfterToolCallContext, CancellationHandle?) async -> AfterToolCallResult?
+
+// MARK: - User-prompt-submit hook
+
+public struct UserPromptSubmitContext: Sendable {
+    public var message: UserMessage
+    public var context: AgentContext
+}
+
+public struct UserPromptSubmitResult: Sendable {
+    /// When true, drop this user message entirely — it will NOT be
+    /// appended to the transcript, and if this was the only prompt
+    /// queued the run will end cleanly. `reason` is surfaced to the
+    /// caller via the synthetic stop message.
+    public var block: Bool
+    public var reason: String?
+    /// Optional replacement for the submitted user message. Use this
+    /// to inject extra context (system preambles, redacted attachments,
+    /// instructions from a policy engine) without the user seeing two
+    /// versions of their prompt. `nil` means "leave the message as-is".
+    public var modifiedMessage: UserMessage?
+
+    public init(block: Bool = false, reason: String? = nil, modifiedMessage: UserMessage? = nil) {
+        self.block = block
+        self.reason = reason
+        self.modifiedMessage = modifiedMessage
+    }
+}
+
+/// Fires once per user message about to enter the transcript — that
+/// covers the initial `agent.prompt()` call, steering injections, and
+/// follow-up drains. Mirrors the SDK's `UserPromptSubmit` hook. Returning
+/// nil leaves the message unchanged; returning a result with `block=true`
+/// drops it; `modifiedMessage` rewrites it in place.
+public typealias UserPromptSubmitHook = @Sendable (UserPromptSubmitContext, CancellationHandle?) async -> UserPromptSubmitResult?
 
 /// Transform the message list the LLM sees. Return nil to reuse the default
 /// pass-through behavior. Mirrors pi-agent-core's `convertToLlm` /

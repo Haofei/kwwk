@@ -23,9 +23,9 @@ final class ModalHost {
     private var active: Modal?
 
     private let layout: CodingLayout
-    /// Re-render the transcript from its canonical source (the
-    /// TranscriptRenderer's accumulated line list). Called on close so the
-    /// user goes back to exactly what was on screen before the modal.
+    /// Re-render the live tail from its canonical source (the
+    /// TranscriptRenderer's liveLines + any notifications). Called on close
+    /// so the user goes back to exactly what was on screen before the modal.
     private let restoreTranscript: () -> Void
     private let requestRender: () -> Void
 
@@ -62,7 +62,7 @@ final class ModalHost {
 
     private func redraw() {
         guard let active else { return }
-        layout.setTranscript(active.render())
+        layout.setLiveTail(active.render())
         requestRender()
     }
 }

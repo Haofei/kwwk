@@ -45,7 +45,12 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         self.urlBuilder = urlBuilder ?? { model, options, fallback, key in
             var base = model.baseUrl.isEmpty ? fallback.absoluteString : model.baseUrl
             while base.hasSuffix("/") { base.removeLast() }
-            var path = "\(base)/v1beta/models/\(model.id):streamGenerateContent?alt=sse"
+            // pi-mono's models.json bakes the API version into the baseUrl
+            // (`.../v1beta`) for Gemini entries, while callers constructing
+            // providers by hand typically pass just the host root. Accept
+            // both by only appending `/v1beta` when it's not already there.
+            let versioned = base.hasSuffix("/v1beta") ? base : "\(base)/v1beta"
+            var path = "\(versioned)/models/\(model.id):streamGenerateContent?alt=sse"
             if let key, !key.isEmpty {
                 path += "&key=\(key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key)"
             }

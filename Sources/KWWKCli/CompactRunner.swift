@@ -114,6 +114,24 @@ func renderForSummary(_ messages: [Message]) -> String {
     }.joined(separator: "\n\n")
 }
 
+/// Render a dimmed, full-width boundary marker that sits in scrollback
+/// to show the user "everything above this line was summarized". Used
+/// by both `/compact` and the auto-compact driver so the two paths
+/// leave an identical visual trail.
+///
+/// Returns three lines (leading blank, rule, trailing blank) so callers
+/// can hand them straight to `TUI.commit(_:)`.
+func renderCompactBoundary(messagesCompacted: Int, hasRunningTasksLedger: Bool, width: Int) -> [String] {
+    var label = "compacted \(messagesCompacted) messages → 1 recap"
+    if hasRunningTasksLedger { label += " (+ running-task ledger)" }
+    let prefix = "── "
+    let spacedLabel = " \(label) "
+    let overhead = prefix.count + spacedLabel.count
+    let fill = max(3, width - overhead)
+    let rule = Style.dimmed(prefix + spacedLabel + String(repeating: "─", count: fill))
+    return ["", rule, ""]
+}
+
 enum CompactError: Error, LocalizedError {
     case summarizationFailed(String)
     case emptySummary

@@ -245,4 +245,41 @@ struct AnthropicProviderTests {
         let tools = json?["tools"] as? [[String: Any]]
         #expect(tools?.first?["name"] as? String == "calc")
     }
+
+    @Test("thinking block is emitted when reasoning level is set, temperature dropped")
+    func thinkingBody() async throws {
+        let client = StubSSEClient(body: Self.textSSE)
+        let provider = AnthropicProvider(client: client, defaultAPIKey: "k")
+        _ = provider.stream(
+            model: Self.sampleModel,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: StreamOptions(temperature: 0.2, reasoning: .medium)
+        )
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let body = client.lastRequest?.body ?? Data()
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let thinking = json?["thinking"] as? [String: Any]
+        #expect(thinking?["type"] as? String == "enabled")
+        // Default medium = 8192 tokens when no explicit ThinkingBudgets passed.
+        #expect(thinking?["budget_tokens"] as? Int == 8192)
+        // Claude Messages API rejects any temperature != 1 when thinking
+        // is on, so we drop it from the body.
+        #expect(json?["temperature"] == nil)
+    }
+
+    @Test("thinking is omitted when reasoning level is nil, temperature passes through")
+    func thinkingOmittedWithoutReasoning() async throws {
+        let client = StubSSEClient(body: Self.textSSE)
+        let provider = AnthropicProvider(client: client, defaultAPIKey: "k")
+        _ = provider.stream(
+            model: Self.sampleModel,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: StreamOptions(temperature: 0.2)
+        )
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let body = client.lastRequest?.body ?? Data()
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(json?["thinking"] == nil)
+        #expect(json?["temperature"] as? Double == 0.2)
+    }
 }

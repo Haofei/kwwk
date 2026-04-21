@@ -1,8 +1,21 @@
 import Foundation
 
-/// Minimal single-line text input with cursor navigation. Mirrors the
-/// behavior exercised by pi-tui's `input.test.ts`: insertion, backspace,
-/// delete, home/end, horizontal scroll, and CJK width safety.
+/// Multi-line text editor. Content is stored as a flat `[Character]`
+/// buffer; newlines (`\n`) inside the buffer force hard breaks in the
+/// rendered output, and anything that would overflow `width` at render
+/// time soft-wraps onto the next visual row. The cursor is tracked as a
+/// linear index into the buffer but placed on the correct visual
+/// (row, col) at render time.
+///
+/// Keyboard map mirrors readline/emacs basics (left/right, home/end,
+/// Ctrl-A/E/B/F/U/K, backspace, delete). Newline-insert triggers:
+///
+///   - Ctrl+Enter  (terminals that send a modifier-tagged Enter)
+///   - Alt+Enter   (ESC + CR — broadly supported)
+///   - Ctrl+J      (raw LF — 0x0A; always works)
+///
+/// Plain Enter is left alone so the owning view (CodingTUI) can bind
+/// it to "submit".
 final class InputComponent: Component, Focusable, @unchecked Sendable {
     private var chars: [Character]
     private(set) var cursor: Int  // cursor position in chars (0...count)
@@ -13,12 +26,13 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
     /// stripped, body as-is — may contain newlines). When nil the
     /// component inserts the body inline as plain text. Callers use
     /// this to peel off paths / images / multi-line blocks before they
-    /// reach the single-line editor.
+    /// reach the editor.
     var onPaste: ((String) -> Void)?
 
     private var cachedOutput: [String]?
     private var cachedWidth: Int?
     private var cachedState: [Character]?
+    private var cachedFocused: Bool?
 
     init(initial: String = "") {
         self.chars = Array(initial)
@@ -68,90 +82,102 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
     // MARK: - Component
 
     func render(width: Int) -> [String] {
-        if let cachedOutput, cachedWidth == width, cachedState == chars {
+        if let cachedOutput,
+           cachedWidth == width,
+           cachedState == chars,
+           cachedFocused == focused {
             return cachedOutput
         }
-        let line = renderLine(width: width)
-        cachedOutput = [line]
+        let rows = layoutRows(width: max(1, width))
+        cachedOutput = rows
         cachedWidth = width
         cachedState = chars
-        return [line]
+        cachedFocused = focused
+        return rows
     }
 
-    private func renderLine(width: Int) -> String {
-        guard width > 0 else { return "" }
-        // Compute the visible column of each character up to cursor so we can
-        // scroll by *visible columns* (CJK chars are width 2). Without this
-        // the cursor drifts left whenever the user types Chinese.
-        let widths: [Int] = chars.map { ch in
-            var w = 0
-            for scalar in ch.unicodeScalars {
-                w += ANSI.columnWidth(of: scalar.value)
+    /// Core wrap pass: walk the buffer once, laying each character out
+    /// on (row, col) with `\n` forcing a new row and width overflow
+    /// soft-wrapping. Returns the visual rows plus — when focused — a
+    /// zero-width cursor marker inserted at the cursor's visual column.
+    private func layoutRows(width: Int) -> [String] {
+        var rows: [[Character]] = [[]]
+        var cols: [Int] = [0]     // visible column width of each row so far
+        var cursorRow = 0
+        var cursorCol = 0
+
+        for i in 0..<chars.count {
+            if i == cursor {
+                cursorRow = rows.count - 1
+                cursorCol = cols.last!
             }
-            return max(1, w)
+            let ch = chars[i]
+            if ch == "\n" {
+                rows.append([])
+                cols.append(0)
+                continue
+            }
+            let w = charColumnWidth(ch)
+            // Soft-wrap: this char wouldn't fit on the current row.
+            if cols.last! + w > width {
+                rows.append([])
+                cols.append(0)
+            }
+            rows[rows.count - 1].append(ch)
+            cols[cols.count - 1] += w
         }
-        // Cumulative visible column after the first N characters.
-        var cumulative: [Int] = [0]
-        cumulative.reserveCapacity(widths.count + 1)
-        for w in widths { cumulative.append(cumulative.last! + w) }
-        let cursorCol = cumulative[cursor]
-
-        // Horizontal scroll: slide the window so the cursor is on-screen.
-        let startCol: Int
-        if cursorCol < width {
-            startCol = 0
-        } else {
-            startCol = cursorCol - width + 1
-        }
-
-        // Find the first character whose leading col >= startCol.
-        var startIndex = 0
-        while startIndex < cumulative.count - 1, cumulative[startIndex] < startCol {
-            startIndex += 1
-        }
-        // Collect chars whose trailing col <= startCol + width.
-        var slice = ""
-        var col = cumulative[startIndex]
-        var i = startIndex
-        while i < chars.count {
-            let w = widths[i]
-            if col + w > startCol + width { break }
-            slice.append(chars[i])
-            col += w
-            i += 1
+        if cursor == chars.count {
+            cursorRow = rows.count - 1
+            cursorCol = cols.last!
         }
 
+        var out: [String] = rows.map { String($0) }
         if focused {
-            // Cursor marker: position by visible column relative to slice start.
-            let rel = cursorCol - cumulative[startIndex]
-            // Walk the slice and insert the marker at the scalar offset that
-            // matches the target visible column.
-            var out = ""
-            var visible = 0
-            var inserted = false
-            for scalar in slice.unicodeScalars {
-                if !inserted && visible >= rel {
-                    out += CURSOR_MARKER
-                    inserted = true
-                }
-                out.unicodeScalars.append(scalar)
-                visible += ANSI.columnWidth(of: scalar.value)
-            }
-            if !inserted {
-                out += CURSOR_MARKER
-            }
-            return out
+            out[cursorRow] = insertCursorMarker(in: out[cursorRow], atCol: cursorCol)
         }
-        return slice
+        return out
+    }
+
+    /// Visible column width of a single `Character` — sums the per-scalar
+    /// widths (a precomposed `Character` like "é" normally has width 1;
+    /// CJK ideographs width 2).
+    private func charColumnWidth(_ ch: Character) -> Int {
+        var w = 0
+        for scalar in ch.unicodeScalars {
+            w += ANSI.columnWidth(of: scalar.value)
+        }
+        return max(1, w)
+    }
+
+    /// Insert a zero-width cursor marker into `line` at the given
+    /// visible column (counting scalar widths ANSI-style). If the
+    /// column is at or past the visible end, the marker goes at the
+    /// end — the TUI's cursor positioner handles "just past last col"
+    /// naturally.
+    private func insertCursorMarker(in line: String, atCol col: Int) -> String {
+        var out = ""
+        var visible = 0
+        var inserted = false
+        for scalar in line.unicodeScalars {
+            if !inserted && visible >= col {
+                out += CURSOR_MARKER
+                inserted = true
+            }
+            out.unicodeScalars.append(scalar)
+            visible += ANSI.columnWidth(of: scalar.value)
+        }
+        if !inserted {
+            out += CURSOR_MARKER
+        }
+        return out
     }
 
     func invalidate() {
         cachedOutput = nil
         cachedWidth = nil
         cachedState = nil
+        cachedFocused = nil
     }
-
-    // MARK: - Input
 
     // MARK: - Bracketed paste wrapper
 
@@ -187,9 +213,9 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
             if let handler = onPaste {
                 handler(pasteBody)
             } else {
-                // Flatten newlines — single-line editor — so a stray
-                // multi-line paste doesn't desync the cursor math.
-                insert(pasteBody.replacingOccurrences(of: "\n", with: " "))
+                // No handler configured — insert verbatim. The editor is
+                // multi-line, so newlines survive.
+                insert(pasteBody)
             }
             return
         }
@@ -206,6 +232,16 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
             case ("f", true, false): moveCursor(1)
             case ("u", true, false): chars.removeFirst(cursor); cursor = 0; invalidate()
             case ("k", true, false): chars.removeLast(chars.count - cursor); invalidate()
+            // Newline-insert triggers. Ctrl+J is the raw LF byte
+            // (0x0A); terminals emit it even without any keyboard
+            // protocol support. Alt+Enter and Ctrl+Enter require
+            // either a terminal that tags Enter with the modifier
+            // (Kitty/Ghostty kbd protocol) or Alt remapping — they're
+            // offered as convenience bindings for users whose
+            // terminal cooperates.
+            case ("j", true, false): insert("\n")
+            case ("enter", true, false): insert("\n")
+            case ("enter", false, true): insert("\n")
             default: break
             }
             return
@@ -217,7 +253,11 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
         case "end": moveEnd()
         case "backspace": backspace()
         case "delete": deleteForward()
-        case "enter": break // owners respond via their own bindings
+        case "enter":
+            if event.shift {
+                insert("\n")
+            }
+            break
         case "escape": break
         case "space": insert(" ")
         case "tab": insert("\t")

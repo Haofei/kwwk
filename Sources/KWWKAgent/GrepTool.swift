@@ -36,16 +36,38 @@ public struct LocalGrepOperations: GrepOperations {
             ? collectFiles(at: rootURL)
             : [rootURL]
 
-        for fileURL in files {
-            if let data = try? Data(contentsOf: fileURL),
-               let text = String(data: data, encoding: .utf8) {
-                let lines = text.components(separatedBy: "\n")
-                for (i, line) in lines.enumerated() {
-                    let ns = line as NSString
-                    if pattern.firstMatch(in: line, options: [], range: NSRange(location: 0, length: ns.length)) != nil {
-                        results.append(GrepMatch(file: fileURL.path, line: i + 1, text: line))
-                        if let limit = params.limit, results.count >= limit { return results }
+        let limit = params.limit ?? Truncate.grepDefaultLimit
+        let maxLineChars = Truncate.grepMaxLineLength
+        let maxTotalBytes = Truncate.grepMaxTotalBytes
+        var totalBytes = 0
+
+        outer: for fileURL in files {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let text = String(data: data, encoding: .utf8) else { continue }
+            let lines = text.components(separatedBy: "\n")
+            for (i, line) in lines.enumerated() {
+                let ns = line as NSString
+                if pattern.firstMatch(in: line, options: [], range: NSRange(location: 0, length: ns.length)) != nil {
+                    let truncated = Truncate.truncateLine(line, maxChars: maxLineChars)
+                    let match = GrepMatch(
+                        file: fileURL.path,
+                        line: i + 1,
+                        text: truncated.text
+                    )
+                    let entryBytes = "\(match.file):\(match.line):\(match.text)\n".utf8.count
+                    if totalBytes + entryBytes > maxTotalBytes && !results.isEmpty {
+                        // Mark the last result so the caller knows we
+                        // stopped because of the byte budget.
+                        results.append(GrepMatch(
+                            file: "",
+                            line: 0,
+                            text: "[truncated: total output exceeded \(Truncate.formatSize(maxTotalBytes))]"
+                        ))
+                        break outer
                     }
+                    totalBytes += entryBytes
+                    results.append(match)
+                    if results.count >= limit { break outer }
                 }
             }
         }
@@ -83,12 +105,22 @@ public func createGrepTool(cwd: String, options: GrepToolOptions = .init()) -> A
         "required": ["pattern"],
     ]
     let ops = options.operations
+    let defaultLimit = Truncate.grepDefaultLimit
+    let maxLineChars = Truncate.grepMaxLineLength
+    let maxTotalBytes = Truncate.grepMaxTotalBytes
     return AgentTool(
         name: "grep",
         label: "grep",
-        description: "Search file contents for a regex pattern.",
+        description: """
+        Search file contents for a regex pattern. Results are capped to avoid flooding the context window:
+          - Default \(defaultLimit) matches (override with `limit`)
+          - Single lines truncated to \(maxLineChars) chars
+          - Total output capped at ~\(Truncate.formatSize(maxTotalBytes))
+        Use a tighter `limit` or a more specific pattern when searching large codebases.
+        """,
         parameters: parameters,
-        execute: { _, args, _, _ in
+        execute: { _, args, cancellation, _ in
+            try cancellation?.throwIfCancelled()
             guard case .object(let obj) = args,
                   case .string(let pattern) = obj["pattern"] ?? .null else {
                 throw CodingToolError.invalidArgument("grep: `pattern` is required")
@@ -119,24 +151,45 @@ public func createGrepTool(cwd: String, options: GrepToolOptions = .init()) -> A
                 limit: limit
             ))
 
-            if matches.isEmpty {
+            // Detect the sentinel we inject when the byte budget is hit.
+            let byteTruncated = matches.last?.text.hasPrefix("[truncated: total output exceeded") == true
+            let effectiveMatches = byteTruncated ? Array(matches.dropLast()) : matches
+
+            if effectiveMatches.isEmpty {
                 return AgentToolResult(
                     content: [.text(TextContent(text: "No matches found for \(pattern)"))],
                     details: .object(["matches": .array([])])
                 )
             }
-            let lines = matches.map { "\($0.file):\($0.line):\($0.text)" }
+
+            var lines = effectiveMatches.map { "\($0.file):\($0.line):\($0.text)" }
+            if byteTruncated {
+                lines.append("[truncated: total output exceeded \(Truncate.formatSize(maxTotalBytes))]")
+            }
             let body = lines.joined(separator: "\n")
-            let encoded: [JSONValue] = matches.map { m in
+
+            let encoded: [JSONValue] = effectiveMatches.map { m in
                 .object([
                     "file": .string(m.file),
                     "line": .int(m.line),
                     "text": .string(m.text),
                 ])
             }
+
+            var details: [String: JSONValue] = [
+                "matches": .array(encoded),
+                "totalMatches": .int(effectiveMatches.count),
+                "truncated": .bool(byteTruncated || effectiveMatches.count >= (limit ?? defaultLimit)),
+            ]
+            if byteTruncated {
+                details["truncatedBy"] = .string("bytes")
+            } else if effectiveMatches.count >= (limit ?? defaultLimit) {
+                details["truncatedBy"] = .string("limit")
+            }
+
             return AgentToolResult(
                 content: [.text(TextContent(text: body))],
-                details: .object(["matches": .array(encoded)])
+                details: .object(details)
             )
         }
     )

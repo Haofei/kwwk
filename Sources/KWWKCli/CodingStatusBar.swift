@@ -14,18 +14,27 @@ import KWWKAgent
 /// task counts stay live even when the agent is idle).
 @MainActor
 final class CodingStatusBar {
-    enum Mode { case idle, streaming, aborting, flashing, compacting }
+    enum Mode { case idle, streaming, aborting, flashing, compacting, retrying }
 
     private let layout: CodingLayout
     private let runner: TUIRunner
     private let agent: Agent
     private let bgManager: BackgroundTaskManager
     private let sessionId: String
+    private let terminal: Terminal
     private var mode: Mode = .idle
     private var flashText: String?
     /// Count of messages the auto-compact driver is rolling up. Displayed
     /// in the status line while `mode == .compacting`.
     private var compactingMessageCount: Int = 0
+    /// Payload for `mode == .retrying`. `until` is an absolute deadline so
+    /// the 500ms poll re-renders a live countdown without needing a
+    /// dedicated timer. Populated via `setRetrying(...)`.
+    private var retryInfo: (attempt: Int, until: Date, reason: String)?
+    /// Optional capacity suffix (e.g. `42% ctx`) appended to the status
+    /// line when non-empty. Updated by the auto-compact controller via
+    /// `setCapacityHint`.
+    private var capacityHint: String = ""
     private var lastRenderedLines: [String] = []
 
     init(
@@ -40,9 +49,33 @@ final class CodingStatusBar {
         self.agent = agent
         self.bgManager = bgManager
         self.sessionId = sessionId
+        self.terminal = runner.terminal
     }
 
-    func setMode(_ mode: Mode) { self.mode = mode }
+    func setMode(_ mode: Mode) {
+        self.mode = mode
+        if mode != .retrying { retryInfo = nil }
+    }
+
+    /// Enter the retrying state. The bar shows a live countdown on the
+    /// existing 500ms poll tick. `attempt` is the zero-indexed attempt
+    /// that just failed (so `attempt: 0` means the first request failed
+    /// and we're scheduling attempt #2).
+    func setRetrying(attempt: Int, delayMs: UInt64, reason: String) {
+        mode = .retrying
+        retryInfo = (
+            attempt: attempt,
+            until: Date().addingTimeInterval(Double(delayMs) / 1000.0),
+            reason: reason
+        )
+    }
+
+    /// Update the capacity suffix (`42% ctx` or the alert form when the
+    /// threshold is crossed). Pass the empty string to hide it. Does not
+    /// re-render — callers typically follow with `render()` anyway.
+    func setCapacityHint(_ hint: String) {
+        capacityHint = hint
+    }
 
     /// Enter/leave the auto-compact "busy" state. `count` is the number
     /// of messages being rolled up; surfaced in the status line so the
@@ -98,6 +131,29 @@ final class CodingStatusBar {
             // lands, but we want the user to see "aborting…" immediately.
             line = Style.running("● aborting…") + " " +
                 Style.dimmed("· Ctrl-C to force quit")
+        } else if mode == .retrying, let info = retryInfo {
+            let remaining = max(0, info.until.timeIntervalSinceNow)
+            // "retry N/M in Xs" — N is the upcoming attempt (1-indexed),
+            // M is the total attempt cap. reason is trimmed to keep the
+            // status row single-line.
+            let upcoming = info.attempt + 2
+            let total = 5 // keep in sync with AgentLoop.maxRetries
+            let countdown: String
+            if remaining >= 1.0 {
+                countdown = "\(Int(remaining.rounded(.up)))s"
+            } else {
+                countdown = "now"
+            }
+            let trimmedReason = info.reason.prefix(60)
+            var parts = [
+                Style.running("⟳ retry \(upcoming)/\(total) in \(countdown)"),
+                Style.dimmed("· \(trimmedReason)"),
+                Style.dimmed("· Esc to cancel"),
+            ]
+            if running > 0 {
+                parts.append(Style.dimmed("· \(running) bg \(running == 1 ? "task" : "tasks") running"))
+            }
+            line = parts.joined(separator: " ")
         } else if isStreaming {
             var parts = [Style.running("● generating…")]
             parts.append(Style.dimmed("· Esc to cancel"))
@@ -114,11 +170,42 @@ final class CodingStatusBar {
             line = ""
         }
 
-        let newLines = [line]
+        // Right-align the capacity hint so the status row reads as a
+        // balanced band: state/hints hug the left edge, `42% ctx` hugs
+        // the right edge. When only one side has content the other side
+        // is empty padding — visually that still reads as a single
+        // working line instead of "mostly empty space".
+        let fullLine = padBetween(
+            left: line,
+            right: capacityHint,
+            width: terminal.width
+        )
+
+        let newLines = [fullLine]
         if newLines != lastRenderedLines {
             lastRenderedLines = newLines
             layout.status.lines = newLines
             runner.tui.requestRender()
         }
     }
+}
+
+/// Pad `left` and `right` out to `width` visible columns so `right` sits
+/// at the right edge and `left` at the left. Falls back to either side
+/// alone when the other is empty. If the two together already exceed the
+/// width we concatenate with a single space — truncation is left to the
+/// TUI's per-line width-clip.
+func padBetween(left: String, right: String, width: Int) -> String {
+    if left.isEmpty && right.isEmpty { return "" }
+    if right.isEmpty { return left }
+    if left.isEmpty {
+        let pad = max(0, width - ANSI.visibleWidth(right))
+        return String(repeating: " ", count: pad) + right
+    }
+    let combined = ANSI.visibleWidth(left) + ANSI.visibleWidth(right)
+    if combined + 1 >= width {
+        return left + " " + right
+    }
+    let spaces = width - combined
+    return left + String(repeating: " ", count: spaces) + right
 }

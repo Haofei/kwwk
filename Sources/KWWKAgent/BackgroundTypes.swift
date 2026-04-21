@@ -166,7 +166,7 @@ public struct BackgroundTaskNotification: Sendable {
             lines.append("  </output-tail>")
         }
         if stalled {
-            lines.append("  <suggestion>The command looks blocked on an interactive prompt. Kill it with bg_status and retry with piped input (e.g. `echo y | command`) or a non-interactive flag.</suggestion>")
+            lines.append("  <suggestion>The command looks blocked on an interactive prompt. Kill it with task_status and retry with piped input (e.g. `echo y | command`) or a non-interactive flag.</suggestion>")
         }
         lines.append("</task-notification>")
         return lines.joined(separator: "\n")

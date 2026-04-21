@@ -29,7 +29,9 @@ struct CompactCommandTests {
             modal: makeStubModalHost(),
             backgroundManager: BackgroundTaskManager(outputDir: makeTempDir()),
             sessionId: "test-session",
-            notify: { notifier.append($0) }
+            notifyBlock: { lines in for l in lines { notifier.append(l) } },
+            commitScrollback: { _ in },
+            refreshTranscript: {}
         )
         let registry = SlashCommandRegistry()
         registerBuiltinSlashCommands(registry)
@@ -60,7 +62,9 @@ struct CompactCommandTests {
             modal: makeStubModalHost(),
             backgroundManager: BackgroundTaskManager(outputDir: makeTempDir()),
             sessionId: "test-session",
-            notify: { notifier.append($0) }
+            notifyBlock: { lines in for l in lines { notifier.append(l) } },
+            commitScrollback: { _ in },
+            refreshTranscript: {}
         )
         let registry = SlashCommandRegistry()
         registerBuiltinSlashCommands(registry)
@@ -96,12 +100,15 @@ struct CompactCommandTests {
         ))
 
         let notifier = NotifyBox()
+        let commits = CommitBox()
         let ctx = SlashContext(
             agent: agent,
             modal: makeStubModalHost(),
             backgroundManager: BackgroundTaskManager(outputDir: makeTempDir()),
             sessionId: "test-session",
-            notify: { notifier.append($0) }
+            notifyBlock: { lines in for l in lines { notifier.append(l) } },
+            commitScrollback: commits.collect(),
+            refreshTranscript: {}
         )
         let registry = SlashCommandRegistry()
         registerBuiltinSlashCommands(registry)
@@ -117,7 +124,40 @@ struct CompactCommandTests {
         } else {
             Issue.record("expected recap message to be a .user block")
         }
-        #expect(notifier.joined.contains("compacted 6 messages → 1 recap"))
+        // The durable boundary lives in scrollback now, not in the
+        // transient notification area.
+        #expect(commits.joined.contains("compacted 6 messages → 1 recap"))
+        // And it's shaped like a horizontal rule so it stands out when
+        // the user scrolls back through history.
+        #expect(commits.joined.contains("──"))
+    }
+
+    @MainActor
+    @Test("renderCompactBoundary fills the width and includes the message count")
+    func renderCompactBoundaryShape() {
+        let lines = renderCompactBoundary(
+            messagesCompacted: 17,
+            hasRunningTasksLedger: false,
+            width: 60
+        )
+        // Three-line pattern: blank → rule → blank.
+        #expect(lines.count == 3)
+        #expect(lines.first == "")
+        #expect(lines.last == "")
+        let rule = lines[1]
+        #expect(rule.contains("compacted 17 messages → 1 recap"))
+        #expect(rule.contains("──"))
+    }
+
+    @MainActor
+    @Test("renderCompactBoundary notes a running-task ledger when present")
+    func renderCompactBoundaryLedger() {
+        let lines = renderCompactBoundary(
+            messagesCompacted: 4,
+            hasRunningTasksLedger: true,
+            width: 80
+        )
+        #expect(lines[1].contains("running-task ledger"))
     }
 }
 
@@ -146,5 +186,28 @@ private func makeTempDir() -> URL {
 private final class NotifyBox {
     private(set) var lines: [String] = []
     func append(_ s: String) { lines.append(s) }
+    var joined: String { lines.joined(separator: "\n") }
+}
+
+/// Records everything a handler pushed into scrollback via
+/// `SlashContext.commitScrollback`. Lets tests assert on durable
+/// output separately from transient `notify` lines.
+@MainActor
+final class CommitBox {
+    private(set) var lines: [String] = []
+    /// Width handed to the render closure when the handler calls
+    /// `commitScrollback`. 80 is a reasonable terminal-default for
+    /// test output; callers that care can set a different width.
+    let width: Int
+    init(width: Int = 80) { self.width = width }
+
+    /// Ready-to-use closure for `SlashContext.commitScrollback`.
+    func collect() -> @MainActor ((Int) -> [String]) -> Void {
+        return { render in
+            let chunk = render(self.width)
+            self.lines.append(contentsOf: chunk)
+        }
+    }
+
     var joined: String { lines.joined(separator: "\n") }
 }

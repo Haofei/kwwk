@@ -95,20 +95,6 @@ private func makeOutputDir() -> URL {
     return dir
 }
 
-/// Await a condition, polling every 10ms. Returns true if it held within
-/// the budget; false on timeout.
-private func awaitUntil(
-    _ budgetMs: Int,
-    _ predicate: @Sendable () async -> Bool
-) async -> Bool {
-    let start = Date()
-    while Date().timeIntervalSince(start) * 1000 < Double(budgetMs) {
-        if await predicate() { return true }
-        try? await Task.sleep(nanoseconds: 10_000_000)
-    }
-    return false
-}
-
 // MARK: - Suites
 
 @Suite("BackgroundTaskManager")
