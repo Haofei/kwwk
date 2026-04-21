@@ -278,6 +278,133 @@ struct AutoCompactGatingTests {
     }
 }
 
+@Suite("AutoCompactController between-turns inline compact")
+struct AutoCompactInlineTests {
+
+    @MainActor
+    @Test("maybeCompactInline returns a replacement context when above threshold")
+    func inlineReplacesContext() async {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+        // The summarizer call that performCompact makes under the hood
+        // hits this faux response.
+        faux.setResponses([.message(fauxAssistantMessage("recap"))])
+
+        let assistant = AssistantMessage(
+            content: [.text(TextContent(text: "ok"))],
+            api: faux.getModel().api,
+            provider: faux.getModel().provider,
+            model: faux.getModel().id,
+            usage: Usage(input: 160_000, output: 5_000, cacheRead: 0, cacheWrite: 0, totalTokens: 165_000)
+        )
+        let messages: [Message] = [
+            .user(UserMessage(text: "u1")),
+            .assistant(assistant),
+            .user(UserMessage(text: "u2")),
+            .assistant(assistant),
+        ]
+        let agent = Agent(initialState: AgentInitialState(
+            model: fauxModelWithWindow(200_000, faux: faux),
+            messages: messages
+        ))
+        let controller = makeController(agent: agent, threshold: 0.75)
+
+        // The hook must see `isStreaming == true` in prod — simulate
+        // that so we know `performCompact` isn't refusing on the
+        // busy guard.
+        agent.state.setStreaming(true)
+        defer { agent.state.setStreaming(false) }
+
+        let context = AgentContext(
+            systemPrompt: "",
+            messages: messages,
+            tools: []
+        )
+        let replacement = await controller.maybeCompactInline(context: context)
+
+        #expect(replacement != nil, "should replace context when 82.5% > 75%")
+        #expect(replacement?.messages.count == 1, "replacement should carry the single recap message")
+        #expect(agent.state.messages.count == 1, "state.messages should also hold the recap")
+    }
+
+    @MainActor
+    @Test("maybeCompactInline returns nil when under threshold")
+    func inlineSkipsUnderThreshold() async {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+
+        let small = AssistantMessage(
+            content: [.text(TextContent(text: "ok"))],
+            api: faux.getModel().api,
+            provider: faux.getModel().provider,
+            model: faux.getModel().id,
+            usage: Usage(input: 10_000, output: 500, cacheRead: 0, cacheWrite: 0, totalTokens: 10_500)
+        )
+        let messages: [Message] = [
+            .user(UserMessage(text: "u")),
+            .assistant(small),
+        ]
+        let agent = Agent(initialState: AgentInitialState(
+            model: fauxModelWithWindow(200_000, faux: faux),
+            messages: messages
+        ))
+        let controller = makeController(agent: agent, threshold: 0.75)
+        agent.state.setStreaming(true)
+        defer { agent.state.setStreaming(false) }
+
+        let context = AgentContext(systemPrompt: "", messages: messages, tools: [])
+        let replacement = await controller.maybeCompactInline(context: context)
+        #expect(replacement == nil, "5% should not trigger compact")
+        #expect(agent.state.messages.count == messages.count)
+    }
+
+    @MainActor
+    @Test("maybeCompactInline ignores the isStreaming guard that performCompact normally enforces")
+    func inlineBypassesBusyGuard() async {
+        // Regression for the "auto-compact: agent is busy" bug.
+        // performCompact refuses when isStreaming == true unless the
+        // caller opts out — which the inline path does.
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+        faux.setResponses([.message(fauxAssistantMessage("recap"))])
+
+        let big = AssistantMessage(
+            content: [.text(TextContent(text: "ok"))],
+            api: faux.getModel().api,
+            provider: faux.getModel().provider,
+            model: faux.getModel().id,
+            usage: Usage(input: 160_000, output: 5_000, cacheRead: 0, cacheWrite: 0, totalTokens: 165_000)
+        )
+        let messages: [Message] = [
+            .user(UserMessage(text: "u1")),
+            .assistant(big),
+            .user(UserMessage(text: "u2")),
+            .assistant(big),
+        ]
+        let agent = Agent(initialState: AgentInitialState(
+            model: fauxModelWithWindow(200_000, faux: faux),
+            messages: messages
+        ))
+        let outcomes = OutcomeLog()
+        let controller = makeController(
+            agent: agent,
+            threshold: 0.75,
+            onCompactFinished: { o in outcomes.append(o) }
+        )
+        // Simulate a live agent loop: isStreaming is true in prod when
+        // the betweenTurns hook fires.
+        agent.state.setStreaming(true)
+        defer { agent.state.setStreaming(false) }
+
+        _ = await controller.maybeCompactInline(context: AgentContext(
+            systemPrompt: "",
+            messages: messages,
+            tools: []
+        ))
+        #expect(outcomes.compactedCount == 1, "should succeed despite isStreaming == true")
+    }
+}
+
 @Suite("formatCapacityHint")
 struct CapacityHintTests {
 

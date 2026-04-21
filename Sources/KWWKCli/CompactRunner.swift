@@ -30,9 +30,16 @@ enum CompactOutcome: Sendable {
 func performCompact(
     agent: Agent,
     backgroundManager: BackgroundTaskManager,
-    sessionId: String
+    sessionId: String,
+    // The isStreaming check prevents racing agent.state.messages with a
+    // live agent loop. That is the right default for /compact (the user
+    // can invoke it any time) and for the post-agentEnd deferred path.
+    // For the between-turns hook the guard is inverted: we run *inside*
+    // the loop, in a windowed gap where no LLM call is in flight and the
+    // loop is awaiting the hook — safe to compact. Pass true to skip.
+    ignoreStreaming: Bool = false
 ) async -> CompactOutcome {
-    if agent.state.isStreaming {
+    if !ignoreStreaming && agent.state.isStreaming {
         return .refusedAgentBusy
     }
     let snapshot = agent.state.messages

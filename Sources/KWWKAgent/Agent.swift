@@ -60,6 +60,7 @@ public struct AgentOptions: Sendable {
     public var userPromptSubmit: UserPromptSubmitHook?
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
+    public var betweenTurns: BetweenTurnsHook?
     public var apiKeyResolver: (@Sendable (String) async -> String?)?
 
     public init(
@@ -79,6 +80,7 @@ public struct AgentOptions: Sendable {
         userPromptSubmit: UserPromptSubmitHook? = nil,
         convertToLlm: ConvertToLlmHook? = nil,
         transformContext: TransformContextHook? = nil,
+        betweenTurns: BetweenTurnsHook? = nil,
         apiKeyResolver: (@Sendable (String) async -> String?)? = nil
     ) {
         self.initialState = initialState
@@ -97,6 +99,7 @@ public struct AgentOptions: Sendable {
         self.userPromptSubmit = userPromptSubmit
         self.convertToLlm = convertToLlm
         self.transformContext = transformContext
+        self.betweenTurns = betweenTurns
         self.apiKeyResolver = apiKeyResolver
     }
 }
@@ -124,6 +127,7 @@ public final class Agent: @unchecked Sendable {
     public var userPromptSubmit: UserPromptSubmitHook?
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
+    public var betweenTurns: BetweenTurnsHook?
     public var apiKeyResolver: (@Sendable (String) async -> String?)?
 
     /// Base delay (ms) used for exponential backoff between stream retries.
@@ -175,6 +179,7 @@ public final class Agent: @unchecked Sendable {
         self.userPromptSubmit = options.userPromptSubmit
         self.convertToLlm = options.convertToLlm
         self.transformContext = options.transformContext
+        self.betweenTurns = options.betweenTurns
         self.apiKeyResolver = options.apiKeyResolver
         self.steeringQueue = PendingMessageQueue(mode: options.steeringMode)
         self.followUpQueue = PendingMessageQueue(mode: options.followUpMode)
@@ -387,7 +392,8 @@ extension Agent {
             afterToolCall: afterToolCall,
             userPromptSubmit: userPromptSubmit,
             convertToLlm: convertToLlm,
-            transformContext: transformContext
+            transformContext: transformContext,
+            betweenTurns: betweenTurns
         )
     }
 

@@ -27,6 +27,7 @@ public struct AgentLoopConfig: Sendable {
     public var userPromptSubmit: UserPromptSubmitHook?
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
+    public var betweenTurns: BetweenTurnsHook?
 
     public init(
         model: Model,
@@ -46,7 +47,8 @@ public struct AgentLoopConfig: Sendable {
         afterToolCall: AfterToolCallHook? = nil,
         userPromptSubmit: UserPromptSubmitHook? = nil,
         convertToLlm: ConvertToLlmHook? = nil,
-        transformContext: TransformContextHook? = nil
+        transformContext: TransformContextHook? = nil,
+        betweenTurns: BetweenTurnsHook? = nil
     ) {
         self.model = model
         self.reasoning = reasoning
@@ -66,6 +68,7 @@ public struct AgentLoopConfig: Sendable {
         self.userPromptSubmit = userPromptSubmit
         self.convertToLlm = convertToLlm
         self.transformContext = transformContext
+        self.betweenTurns = betweenTurns
     }
 }
 
@@ -343,6 +346,18 @@ public enum AgentLoop {
                 }
 
                 await emit(.turnEnd(message: .assistant(assistant), toolResults: toolResults))
+
+                // Between-turn hook: the auto-compact driver injects a
+                // summarized transcript here so the next LLM call
+                // doesn't carry the full pre-compact history. Runs
+                // synchronously — the loop blocks until it returns,
+                // which is exactly what we want for "compact is a
+                // blocking state".
+                if let hook = config.betweenTurns {
+                    if let replacement = await hook(currentContext, cancellation) {
+                        currentContext = replacement
+                    }
+                }
 
                 // If the user aborted during tool execution, bail before the
                 // next LLM turn — otherwise we'd re-enter streaming with a

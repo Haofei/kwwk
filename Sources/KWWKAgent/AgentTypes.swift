@@ -271,3 +271,17 @@ public typealias UserPromptSubmitHook = @Sendable (UserPromptSubmitContext, Canc
 /// messages.
 public typealias ConvertToLlmHook = @Sendable ([Message]) async -> [Message]
 public typealias TransformContextHook = @Sendable ([Message], CancellationHandle?) async -> [Message]
+
+/// Fires at every sub-turn boundary — right after `turnEnd` emits, before
+/// the loop decides whether to make another LLM call. Returning a non-nil
+/// context replaces the loop's running transcript (and optionally tools /
+/// system prompt) for the next iteration. Use this for auto-compaction
+/// mid-run: when the hook summarizes the transcript, the next request
+/// goes out with the compacted version instead of the full history.
+///
+/// The hook runs synchronously within the agent loop — long work here
+/// (e.g. an LLM summarization call) blocks the next LLM call, which is
+/// usually what you want for a compact: the loop pauses, UI reflects the
+/// compacting state, user input queues via `steer`, and when the hook
+/// returns the loop resumes with the new context.
+public typealias BetweenTurnsHook = @Sendable (AgentContext, CancellationHandle?) async -> AgentContext?

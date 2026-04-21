@@ -4,9 +4,19 @@ import KWWKAgent
 
 /// Watches each turn's reported token usage and triggers
 /// `performCompact` when the transcript approaches the model's
-/// `contextWindow`. Fires only on `agentEnd` — compacting mid-turn
-/// would replace `agent.state.messages` while the agent loop is still
-/// referencing them, so we wait until the loop is fully idle.
+/// `contextWindow`. Two trigger paths:
+///
+///   - **Between sub-turns** (`maybeCompactInline`): wired as
+///     `agent.betweenTurns`, so the loop pauses between LLM calls long
+///     enough to summarize the transcript in place. Blocks the next
+///     request until the recap is ready — user input typed during this
+///     window goes into the normal steering queue and drains at the
+///     next turn boundary.
+///   - **Post-agentEnd** (`observe`): when a run finishes with the
+///     final turn past threshold, a detached Task waits for the agent
+///     lifecycle to unwind, runs the compact, and drains any queued
+///     steering messages via `agent.continue()` so a prompt the user
+///     typed during the compact actually runs afterward.
 ///
 /// Usage math:
 ///   tokens  = last assistant `usage.input + output + cacheRead + cacheWrite`
@@ -141,6 +151,68 @@ final class AutoCompactController {
         lastUsage = newUsage
         onUsageChange(newUsage)
         onStatusChange(.idle)
+
+        // If the user typed a prompt during the compact, it landed in
+        // the steering queue (`busy` routed it there because
+        // `isCompacting` was true). The agent is idle by now, so
+        // nothing would drain that queue on its own — kick a
+        // `continue()` to pick it up.
+        if case .compacted = outcome, agent.hasQueuedMessages() {
+            try? await agent.continue()
+        }
+    }
+
+    /// Called from the agent loop's `betweenTurns` hook. Runs inside
+    /// the live run — `state.isStreaming == true` by design — in the
+    /// windowed gap between turnEnd and the next LLM call. Returns a
+    /// replacement `AgentContext` when a compact fires so the loop
+    /// picks up the summarized transcript; returns `nil` under
+    /// threshold, while busy, or if the compact refused.
+    func maybeCompactInline(context: AgentContext) async -> AgentContext? {
+        guard let threshold, threshold > 0, !isCompacting else { return nil }
+        // Read usage from the last assistant in the loop's own context
+        // rather than `agent.state.messages` — they should be in sync
+        // (the loop's emits populate state), but the loop's copy is
+        // the authoritative one for the request about to go out.
+        var lastAssistant: AssistantMessage?
+        for message in context.messages.reversed() {
+            if case .assistant(let a) = message { lastAssistant = a; break }
+        }
+        let u = lastAssistant?.usage
+        let tokens = (u?.input ?? 0) + (u?.output ?? 0)
+            + (u?.cacheRead ?? 0) + (u?.cacheWrite ?? 0)
+        let window = agent.state.model.contextWindow
+        guard window > 0, Double(tokens) / Double(window) >= threshold else {
+            return nil
+        }
+
+        // Sync state.messages to what the loop has right now so
+        // performCompact (which reads state.messages) summarizes the
+        // same transcript the loop is about to feed the LLM.
+        agent.state.messages = context.messages
+
+        let snapshotCount = context.messages.count
+        isCompacting = true
+        onStatusChange(.compacting(messagesCount: snapshotCount))
+        let outcome = await performCompact(
+            agent: agent,
+            backgroundManager: backgroundManager,
+            sessionId: sessionId,
+            ignoreStreaming: true
+        )
+        isCompacting = false
+        onCompactFinished(outcome)
+        let newUsage = Usage(tokens: 0, window: window)
+        lastUsage = newUsage
+        onUsageChange(newUsage)
+        onStatusChange(.idle)
+
+        if case .compacted = outcome {
+            var replaced = context
+            replaced.messages = agent.state.messages
+            return replaced
+        }
+        return nil
     }
 }
 

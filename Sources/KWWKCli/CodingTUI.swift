@@ -188,6 +188,14 @@ func runCodingTUIInternal(
             switch status {
             case .compacting(let count):
                 statusBar.setCompacting(messageCount: count)
+                // Leave a visible trail in scrollback so history shows
+                // WHEN the compact started — the terminating boundary
+                // line in onCompactFinished pairs with this one to
+                // frame the compact block.
+                runner.tui.commit([
+                    "",
+                    Style.dimmed("  ◐ auto-compact: summarizing \(count) messages…"),
+                ])
                 runner.tui.requestRender()
             case .idle:
                 statusBar.setMode(.idle)
@@ -206,16 +214,14 @@ func runCodingTUIInternal(
         onCompactFinished: { outcome in
             switch outcome {
             case .compacted(let n, let hasLedger):
-                var lines: [String] = [
-                    "",
-                    Style.dimmed("  auto-compact: summarizing \(n) messages…"),
-                ]
-                lines.append(contentsOf: renderCompactBoundary(
+                // The start marker was already committed in onStatusChange
+                // when the compact began; just add the terminating
+                // boundary here so the pair frames the compact block.
+                runner.tui.commit(renderCompactBoundary(
                     messagesCompacted: n,
                     hasRunningTasksLedger: hasLedger,
                     width: runner.terminal.width
                 ))
-                runner.tui.commit(lines)
             case .refusedAgentBusy:
                 runner.tui.commit([
                     "",
@@ -234,6 +240,16 @@ func runCodingTUIInternal(
             runner.tui.requestRender()
         }
     )
+
+    // Install the between-turns compact hook. The agent loop calls this
+    // synchronously at each sub-turn boundary; if it returns a
+    // replacement context, the loop swaps in the summarized transcript
+    // before the next LLM request. User input typed during the compact
+    // lands in the steering queue via the `busy` branch below and
+    // drains at the next turnStart.
+    agent.betweenTurns = { context, _ in
+        await autoCompact.maybeCompactInline(context: context)
+    }
 
     // Keep the renderer's display mode in sync with the agent's state on
     // every event, so `/thinking show|hide` (which only mutates agent
