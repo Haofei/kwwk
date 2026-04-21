@@ -19,6 +19,14 @@ A Swift-native coding agent with two faces:
 
 ### Install
 
+From Homebrew (recommended):
+
+```sh
+brew install EYHN/tap/kwwk
+```
+
+Or build from source:
+
 ```sh
 swift build -c release
 cp .build/release/kwwk /usr/local/bin/
