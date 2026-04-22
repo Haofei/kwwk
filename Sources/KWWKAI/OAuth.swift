@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Canonical credential shape used by all OAuth providers. `expires` is Unix
 /// time in milliseconds; `extras` holds provider-specific fields that must

@@ -1,8 +1,6 @@
 import Foundation
 import KWWKAI
 
-#if os(macOS)
-
 /// `BackgroundTaskRunner` backed by `Process`. Spawns the command with
 /// stdin redirected from `/dev/null` and both stdout/stderr fd-dup'd onto
 /// the Manager-allocated output file — bytes go straight from the kernel
@@ -20,7 +18,7 @@ public struct BashBackgroundRunner: BackgroundTaskRunner {
         workDir: String? = nil,
         description: String? = nil,
         hardTimeoutSeconds: Int = 1800,
-        shellPath: String = "/bin/zsh",
+        shellPath: String = kwwkDefaultShellPath,
         label: String? = nil,
         extraEnv: [String: String] = [:]
     ) {
@@ -207,6 +205,4 @@ func bashShortLabel(_ command: String, max: Int = 80) -> String {
     if trimmed.count <= max { return trimmed }
     return String(trimmed.prefix(max)) + "…"
 }
-
-#endif // os(macOS)
 

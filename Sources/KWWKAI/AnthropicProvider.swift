@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Anthropic Messages streaming provider. Implements the `anthropic-messages`
 /// API against a pluggable `HTTPClient`.

@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import Crypto
 
 /// PKCE verifier + challenge. The verifier is 32 random bytes encoded as
 /// base64url; the challenge is SHA-256(verifier) in the same encoding.

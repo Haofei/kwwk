@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Thin wrappers over the four base providers that handle vendor-specific
 /// URL / authentication / header differences. Each returns a ready-to-register

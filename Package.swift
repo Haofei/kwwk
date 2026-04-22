@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 import PackageDescription
 
 let package = Package(
@@ -14,9 +14,24 @@ let package = Package(
         .library(name: "KWWKCli", targets: ["KWWKCli"]),
         .executable(name: "kwwk", targets: ["kwwk"]),
     ],
+    dependencies: [
+        // swift-crypto's `Crypto` module is source-compatible with Apple's
+        // `CryptoKit` and ships on both Apple and Linux — one import, one
+        // set of types, regardless of platform.
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
+        // SwiftNIO backs the OAuth callback server. Replaces the Apple
+        // `Network.framework`-only implementation so the OAuth login flow
+        // runs the same code on macOS and Linux.
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
+    ],
     targets: [
         .target(
             name: "KWWKAI",
+            dependencies: [
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+            ],
             path: "Sources/KWWKAI",
             resources: [.process("Resources")]
         ),

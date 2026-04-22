@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Amazon Bedrock Converse Stream provider. Speaks the `ConverseStream`
 /// operation directly over HTTPS + SigV4 + AWS event-stream framing, with no

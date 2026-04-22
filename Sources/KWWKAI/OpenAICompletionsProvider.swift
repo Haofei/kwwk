@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// OpenAI /v1/chat/completions streaming provider. Also usable against any
 /// wire-compatible endpoint — Groq, xAI, OpenRouter, Cerebras, HuggingFace,

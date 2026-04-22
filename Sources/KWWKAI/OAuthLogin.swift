@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Whole-flow orchestrator: build the authorize URL, bring up a local
 /// callback server, launch the user's browser, exchange the received code
@@ -50,7 +53,6 @@ public enum OAuthLogin {
         callbacks: Callbacks = Callbacks(),
         client: HTTPClient = URLSessionHTTPClient()
     ) async throws -> OAuthCredentials {
-        #if canImport(Network)
         let pkce = PKCE.random()
         let port: UInt16 = 53692
         let server = try OAuthCallbackServer(port: port)
@@ -97,9 +99,6 @@ public enum OAuthLogin {
             client: client
         )
         return credentials(from: response, fallbackRefresh: nil)
-        #else
-        throw OAuthError.transport("Network.framework not available on this platform")
-        #endif
     }
 
     // MARK: - OpenAI Codex
@@ -108,7 +107,6 @@ public enum OAuthLogin {
         callbacks: Callbacks = Callbacks(),
         client: HTTPClient = URLSessionHTTPClient()
     ) async throws -> OAuthCredentials {
-        #if canImport(Network)
         let pkce = PKCE.random()
         let state = PKCE.randomHex()
         let port: UInt16 = 1455
@@ -168,9 +166,6 @@ public enum OAuthLogin {
             expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
             extras: extras
         )
-        #else
-        throw OAuthError.transport("Network.framework not available")
-        #endif
     }
 
     // MARK: - Google (Gemini CLI)
@@ -179,7 +174,6 @@ public enum OAuthLogin {
         callbacks: Callbacks = Callbacks(),
         client: HTTPClient = URLSessionHTTPClient()
     ) async throws -> OAuthCredentials {
-        #if canImport(Network)
         let port: UInt16 = 8085
         let server = try OAuthCallbackServer(port: port, path: "/oauth2callback")
         defer { server.stop() }
@@ -242,9 +236,6 @@ public enum OAuthLogin {
             expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
             extras: [:]
         )
-        #else
-        throw OAuthError.transport("Network.framework not available")
-        #endif
     }
 
     // MARK: - GitHub Copilot (device flow)
@@ -420,22 +411,24 @@ extension OAuthLogin {
 // MARK: - Browser launcher
 
 public enum Browser {
-    /// Best-effort URL opener. On macOS runs `/usr/bin/open`; falls back to
-    /// stderr-printing so the user can click manually.
+    /// Best-effort URL opener. macOS uses `/usr/bin/open`; Linux tries
+    /// `xdg-open` then falls back to stderr so the user can click manually.
     public static func open(_ url: URL) {
         #if os(macOS)
+        let opener = "/usr/bin/open"
+        #else
+        let opener = "/usr/bin/xdg-open"
+        #endif
+
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.executableURL = URL(fileURLWithPath: opener)
         process.arguments = [url.absoluteString]
-        do { try process.run() } catch {
+        do {
+            try process.run()
+        } catch {
             FileHandle.standardError.write(Data(
-                "unable to launch browser: \(error). URL:\n  \(url.absoluteString)\n".utf8
+                "please open manually:\n  \(url.absoluteString)\n".utf8
             ))
         }
-        #else
-        FileHandle.standardError.write(Data(
-            "please open manually:\n  \(url.absoluteString)\n".utf8
-        ))
-        #endif
     }
 }

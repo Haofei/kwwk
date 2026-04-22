@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Minimal HTTP client abstraction used by streaming providers. Tests inject a
 /// stub implementation; production code uses `URLSessionHTTPClient`.
@@ -30,26 +33,150 @@ public struct URLSessionHTTPClient: HTTPClient {
         request.httpMethod = method
         for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
         request.httpBody = body
+        return try await streamViaDelegate(base: session, request: request)
+    }
+}
 
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw HTTPClientError.invalidResponse
-        }
+/// Drives a `URLSessionDataTask` through a delegate that forwards the initial
+/// `HTTPURLResponse` and every `didReceive data:` chunk into an
+/// `AsyncThrowingStream<UInt8, Error>`. Each call spins up its own
+/// `URLSession` (delegates are per-session) and tears it down when the body
+/// stream is drained or the consumer cancels.
+///
+/// Uniform across Apple and Linux: Apple also has `URLSession.bytes(for:)`
+/// but keeping one code path saves us from debugging two subtly different
+/// streams. The delegate-based path is a thin shim over `URLSessionDataTask`
+/// — same behavior, same back-pressure semantics on both OSes.
+private func streamViaDelegate(
+    base: URLSession,
+    request: URLRequest
+) async throws -> (HTTPURLResponse, AsyncThrowingStream<UInt8, Error>) {
+    let delegate = StreamingDelegate()
+    let driver = URLSession(
+        configuration: base.configuration,
+        delegate: delegate,
+        delegateQueue: nil
+    )
+    let task = driver.dataTask(with: request)
+    let stream = delegate.makeByteStream(onCancel: { task.cancel() })
+    task.resume()
 
-        let stream = AsyncThrowingStream<UInt8, Error> { continuation in
-            let task = Task {
-                do {
-                    for try await byte in bytes {
-                        continuation.yield(byte)
+    do {
+        let http = try await delegate.awaitResponse()
+        return (http, stream)
+    } catch {
+        task.cancel()
+        driver.finishTasksAndInvalidate()
+        throw error
+    }
+}
+
+private final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var headerContinuation: CheckedContinuation<HTTPURLResponse, Error>?
+    private var headerResolved = false
+    private var pendingHeaders: Result<HTTPURLResponse, Error>?
+    private var bodyContinuation: AsyncThrowingStream<UInt8, Error>.Continuation?
+    /// Error from `didCompleteWithError` that arrived before the body stream
+    /// was constructed. Replayed into the stream once it opens.
+    private var pendingCompletion: Error??
+
+    func awaitResponse() async throws -> HTTPURLResponse {
+        try await withCheckedThrowingContinuation { cont in
+            lock.withLock {
+                if let pending = pendingHeaders {
+                    pendingHeaders = nil
+                    headerResolved = true
+                    switch pending {
+                    case .success(let http): cont.resume(returning: http)
+                    case .failure(let err):  cont.resume(throwing: err)
                     }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+                } else {
+                    headerContinuation = cont
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
         }
-        return (http, stream)
+    }
+
+    func makeByteStream(onCancel: @escaping @Sendable () -> Void) -> AsyncThrowingStream<UInt8, Error> {
+        AsyncThrowingStream<UInt8, Error> { continuation in
+            lock.withLock {
+                bodyContinuation = continuation
+                // Replay a completion that landed before the consumer started
+                // draining — typical when the server closed the connection
+                // between `didReceive response:` and the caller hooking in.
+                if let pending = pendingCompletion {
+                    pendingCompletion = nil
+                    if let err = pending { continuation.finish(throwing: err) }
+                    else { continuation.finish() }
+                }
+            }
+            continuation.onTermination = { _ in onCancel() }
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let http = response as? HTTPURLResponse else {
+            deliverHeader(.failure(HTTPClientError.invalidResponse))
+            completionHandler(.cancel)
+            return
+        }
+        deliverHeader(.success(http))
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let cont = lock.withLock { bodyContinuation }
+        guard let cont else { return }
+        // `yield(contentsOf:)` on a Data wraps it in a Sequence<UInt8>, which
+        // yields without copying and keeps the stream back-pressured.
+        for byte in data { cont.yield(byte) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.withLock {
+            // If `didReceive response:` never fired (DNS/connect failure),
+            // surface the error on the header continuation instead.
+            if !headerResolved {
+                if let cont = headerContinuation {
+                    headerContinuation = nil
+                    headerResolved = true
+                    cont.resume(throwing: error ?? HTTPClientError.invalidResponse)
+                } else {
+                    pendingHeaders = .failure(error ?? HTTPClientError.invalidResponse)
+                    headerResolved = true
+                }
+            }
+            if let body = bodyContinuation {
+                if let err = error { body.finish(throwing: err) }
+                else { body.finish() }
+                bodyContinuation = nil
+            } else {
+                pendingCompletion = .some(error)
+            }
+        }
+        session.finishTasksAndInvalidate()
+    }
+
+    private func deliverHeader(_ result: Result<HTTPURLResponse, Error>) {
+        lock.withLock {
+            guard !headerResolved else { return }
+            headerResolved = true
+            if let cont = headerContinuation {
+                headerContinuation = nil
+                switch result {
+                case .success(let http): cont.resume(returning: http)
+                case .failure(let err):  cont.resume(throwing: err)
+                }
+            } else {
+                pendingHeaders = result
+            }
+        }
     }
 }
 

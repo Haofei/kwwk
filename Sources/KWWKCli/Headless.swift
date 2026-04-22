@@ -1,0 +1,99 @@
+import Foundation
+import KWWKAI
+import KWWKAgent
+
+/// Internal implementation of `kwwk -p <prompt>` — a one-shot, non-interactive
+/// coding-agent run. Mirrors the ergonomics of `claude -p`:
+///
+///   - assistant text streams to **stdout** as it's produced; stdout
+///     carries *only* the assistant's reply so the output can be piped
+///     without a post-filter;
+///   - no chrome is written to stderr during a successful run (no
+///     banner, no tool breadcrumbs, no summary);
+///   - genuine failures — auth missing, stream error, abort — *do* print
+///     a one-line message to stderr so the user isn't left staring at a
+///     silent non-zero exit;
+///   - exit code is `0` when the model reached a clean stop, `1` otherwise.
+///
+/// Credentials are resolved from the OAuth store exactly like
+/// `runCodingTUIInternal` — whichever provider `kwwk login` last wrote wins.
+func runHeadlessInternal(
+    prompt text: String,
+    cwd: String,
+    tools: CodingTools
+) async throws -> Int32 {
+    let resolved = try await resolveAgentAuth()
+
+    let bgManager = BackgroundTaskManager()
+    let sessionId = UUID().uuidString
+    let agent = await makeCodingAgent(CodingAgentConfig(
+        model: resolved.model,
+        cwd: cwd,
+        tools: tools,
+        backgroundManager: bgManager,
+        sessionId: sessionId
+    ))
+    if let apiKeyResolver = resolved.apiKeyResolver {
+        agent.apiKeyResolver = apiKeyResolver
+    }
+    agent.state.thinkingLevel = .medium
+
+    // Shared mutable state carried out of the @Sendable listener. All
+    // reads/writes go through the lock — listener callbacks can fire on
+    // arbitrary threads.
+    final class Box: @unchecked Sendable {
+        var finalStopReason: StopReason?
+        var needsTrailingNewline = false
+        let lock = NSLock()
+    }
+    let box = Box()
+
+    let unsubscribe = agent.subscribe { event, _ in
+        switch event {
+        case .messageUpdate(_, let inner):
+            if case .textDelta(_, let delta, _) = inner {
+                writeStdout(delta)
+                box.lock.withLock {
+                    box.needsTrailingNewline = !delta.hasSuffix("\n")
+                }
+            }
+
+        case .messageEnd:
+            // Separate consecutive assistant messages (tool-use → text →
+            // more text) with a newline so piped output doesn't run
+            // together.
+            let needs = box.lock.withLock { () -> Bool in
+                let v = box.needsTrailingNewline
+                box.needsTrailingNewline = false
+                return v
+            }
+            if needs { writeStdout("\n") }
+
+        case .agentEnd(_, let summary):
+            box.lock.withLock { box.finalStopReason = summary.finalStopReason }
+
+        default:
+            break
+        }
+    }
+    defer { unsubscribe() }
+
+    do {
+        try await agent.prompt(text)
+    } catch {
+        let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        writeStderr("kwwk: \(msg)\n")
+        return 1
+    }
+
+    let stop = box.lock.withLock { box.finalStopReason }
+    return stop == .stop ? 0 : 1
+}
+
+private func writeStdout(_ s: String) {
+    FileHandle.standardOutput.write(Data(s.utf8))
+}
+
+private func writeStderr(_ s: String) {
+    FileHandle.standardError.write(Data(s.utf8))
+}

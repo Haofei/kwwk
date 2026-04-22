@@ -1,8 +1,6 @@
 import Foundation
 import KWWKAI
 
-#if os(macOS)
-
 /// Exposes `TmuxSessionManager` to the agent as a single multiplexed tool.
 /// The tool is only meaningful when tmux is available on PATH — the factory
 /// returns nil otherwise so the agent doesn't see a tool it can't actually
@@ -245,6 +243,4 @@ public func createTmuxTool(
         }
     )
 }
-
-#endif // os(macOS)
 

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// One-call convenience: register all four production providers with the
 /// shared `APIRegistry` using the given per-provider API keys. Only providers

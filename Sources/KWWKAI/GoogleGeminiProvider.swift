@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Google Gemini (Generative AI API) streaming provider —
 /// `/v1beta/models/{model}:streamGenerateContent?alt=sse`.

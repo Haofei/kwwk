@@ -99,7 +99,6 @@ public func makeCodingAgent(_ config: CodingAgentConfig) async -> Agent {
     if config.tools.contains(.read)  { tools.append(createReadTool(cwd: cwd)) }
     if config.tools.contains(.write) { tools.append(createWriteTool(cwd: cwd)) }
     if config.tools.contains(.edit)  { tools.append(createEditTool(cwd: cwd)) }
-    #if os(macOS)
     if config.tools.contains(.bash) {
         tools.append(createBashTool(cwd: cwd, options: BashToolOptions(
             defaultTimeoutSeconds: config.bashDefaultTimeoutSeconds,
@@ -109,7 +108,6 @@ public func makeCodingAgent(_ config: CodingAgentConfig) async -> Agent {
             autoBackgroundOnTimeout: true
         )))
     }
-    #endif
     if config.tools.contains(.grep) { tools.append(createGrepTool(cwd: cwd)) }
     if config.tools.contains(.find) { tools.append(createFindTool(cwd: cwd)) }
     if config.tools.contains(.ls)   { tools.append(createLSTool(cwd: cwd)) }
@@ -119,11 +117,9 @@ public func makeCodingAgent(_ config: CodingAgentConfig) async -> Agent {
     if config.tools.contains(.waitTask), let bgManager {
         tools.append(createWaitTaskTool(manager: bgManager, sessionId: sessionId))
     }
-    #if os(macOS)
     if config.tools.contains(.tmux), let tmuxTool = await createTmuxTool(bgManager: bgManager, sessionId: sessionId) {
         tools.append(tmuxTool)
     }
-    #endif
 
     let systemPrompt = config.systemPrompt ?? buildSystemPrompt(SystemPromptOptions(
         cwd: cwd,

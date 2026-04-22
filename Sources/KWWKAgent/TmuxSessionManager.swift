@@ -1,8 +1,6 @@
 import Foundation
 import KWWKAI
 
-#if os(macOS)
-
 /// Manages an isolated tmux server for running interactive TUI programs the
 /// agent can drive via `send_keys` and observe via `capture_pane`. Every kw
 /// process gets its own socket (`kw-<PID>`) so we don't reach into the user's
@@ -351,6 +349,4 @@ private func deriveName(from command: String) -> String {
     let base = (first as NSString).lastPathComponent
     return base
 }
-
-#endif // os(macOS)
 

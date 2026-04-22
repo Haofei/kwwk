@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// OpenAI /v1/responses streaming provider — the newer native API for the
 /// GPT-5 / Codex model family. Wire format differs substantially from

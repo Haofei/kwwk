@@ -1,7 +1,18 @@
 import Foundation
 import KWWKAI
 
-#if os(macOS)
+/// Platform default for the bash tool's shell path: `/bin/zsh` on macOS
+/// (matches the user's interactive environment), `/bin/bash` on everything
+/// else — zsh is rarely preinstalled on sandbox Linux images, and
+/// `Process.executableURL` surfaces "file doesn't exist" if we point at a
+/// missing binary.
+public let kwwkDefaultShellPath: String = {
+    #if os(macOS)
+    return "/bin/zsh"
+    #else
+    return "/bin/bash"
+    #endif
+}()
 
 public struct BashToolOptions: Sendable {
     /// Legacy pipe-based executor used when `manager` is nil. Tests can
@@ -34,7 +45,7 @@ public struct BashToolOptions: Sendable {
         sessionId: String? = nil,
         autoBackgroundOnTimeout: Bool = true,
         hardTimeoutSeconds: Int = 1800,
-        shellPath: String = "/bin/zsh"
+        shellPath: String = kwwkDefaultShellPath
     ) {
         self.operations = operations
         self.defaultTimeoutSeconds = defaultTimeoutSeconds
@@ -51,7 +62,7 @@ public struct LocalBashOperations: BashOperations {
     public let cwd: String?
     public let shellPath: String
 
-    public init(cwd: String? = nil, shellPath: String = "/bin/zsh") {
+    public init(cwd: String? = nil, shellPath: String = kwwkDefaultShellPath) {
         self.cwd = cwd
         self.shellPath = shellPath
     }
@@ -548,6 +559,4 @@ extension BackgroundTaskManager {
         return url
     }
 }
-
-#endif // os(macOS)
 

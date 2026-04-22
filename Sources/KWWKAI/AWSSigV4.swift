@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import Crypto
 
 /// Minimal AWS Signature V4 signer — enough for `bedrock-runtime` streaming
 /// requests. Single-shot `authorization` header signing, no query-string
