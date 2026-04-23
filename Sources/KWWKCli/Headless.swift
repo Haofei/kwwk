@@ -99,6 +99,10 @@ func runHeadlessInternal(
 
         case .agentEnd(_, let summary):
             box.lock.withLock { box.finalStopReason = summary.finalStopReason }
+            if summary.finalStopReason != .stop,
+               let err = agent.state.errorMessage {
+                writeStderr("kwwk: \(err)\n")
+            }
 
         default:
             break

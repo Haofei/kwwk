@@ -28,6 +28,11 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
     /// `x-api-key` scheme; OAuth bearer variants override this to emit an
     /// `authorization: Bearer …` header instead.
     public let authHeaderBuilder: AuthHeaderBuilder
+    /// Prepended to `system` on every request. OAuth-mode (Claude Pro/Max
+    /// subscription) requires the first system text to identify as Claude
+    /// Code, otherwise the endpoint returns `rate_limit_error` regardless
+    /// of remaining subscription quota.
+    public let systemPromptPrefix: String?
 
     public init(
         api: String = "anthropic-messages",
@@ -36,7 +41,8 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
         defaultAPIKey: String? = nil,
         apiVersion: String = "2023-06-01",
         extraHeaders: [String: String] = [:],
-        authHeaderBuilder: AuthHeaderBuilder? = nil
+        authHeaderBuilder: AuthHeaderBuilder? = nil,
+        systemPromptPrefix: String? = nil
     ) {
         self.api = api
         self.client = client
@@ -45,6 +51,7 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
         self.apiVersion = apiVersion
         self.extraHeaders = extraHeaders
         self.authHeaderBuilder = authHeaderBuilder ?? { key in ["x-api-key": key] }
+        self.systemPromptPrefix = systemPromptPrefix
     }
 
     public func stream(model: Model, context: Context, options: StreamOptions?) -> AssistantMessageStream {
@@ -71,7 +78,12 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
 
         let body: Data
         do {
-            body = try Self.encodeBody(model: model, context: context, options: options)
+            body = try Self.encodeBody(
+                model: model,
+                context: context,
+                options: options,
+                systemPromptPrefix: systemPromptPrefix
+            )
         } catch {
             out.push(.error(reason: .error, error: Self.makeError(
                 model: model, api: api, text: "Failed to encode request: \(error)"
@@ -273,7 +285,10 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
     // MARK: - Helpers
 
     private static func encodeBody(
-        model: Model, context: Context, options: StreamOptions?
+        model: Model,
+        context: Context,
+        options: StreamOptions?,
+        systemPromptPrefix: String? = nil
     ) throws -> Data {
         var root: [String: Any] = [
             "model": model.id,
@@ -299,7 +314,24 @@ public final class AnthropicProvider: APIProvider, @unchecked Sendable {
             thinkingEnabled = false
         }
         if !thinkingEnabled, let temp = options?.temperature { root["temperature"] = temp }
-        if let sys = context.systemPrompt, !sys.isEmpty { root["system"] = sys }
+        // `system` encoding. When a `systemPromptPrefix` is set (Anthropic
+        // OAuth / Claude Pro subscription) the endpoint rejects any shape
+        // where the Claude Code identifier isn't a standalone leading
+        // system block — concatenated strings trip `rate_limit_error`
+        // regardless of remaining quota. Emit array form so the prefix
+        // rides as its own block. Without a prefix, keep the simple
+        // string form that api-key callers have always used.
+        let prefix = (systemPromptPrefix?.isEmpty == false) ? systemPromptPrefix : nil
+        let userSystem = (context.systemPrompt?.isEmpty == false) ? context.systemPrompt : nil
+        if let prefix {
+            var blocks: [[String: Any]] = [["type": "text", "text": prefix]]
+            if let userSystem {
+                blocks.append(["type": "text", "text": userSystem])
+            }
+            root["system"] = blocks
+        } else if let userSystem {
+            root["system"] = userSystem
+        }
         if let tools = context.tools, !tools.isEmpty {
             root["tools"] = tools.map { tool -> [String: Any] in
                 var entry: [String: Any] = [

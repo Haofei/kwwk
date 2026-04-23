@@ -48,6 +48,10 @@ public enum ProviderVariants {
     // Anthropic's OAuth tokens (used by Claude Code) ride on a Bearer header
     // plus the `anthropic-beta: oauth-2025-04-20` opt-in. Wire format is the
     // same Messages API.
+    //
+    // Subscription-token requests must also identify as Claude Code via the
+    // system prompt; otherwise the endpoint returns `rate_limit_error` up
+    // front regardless of remaining quota.
     public static func anthropicOAuth(
         accessToken: String? = nil,
         client: HTTPClient = URLSessionHTTPClient(),
@@ -61,7 +65,8 @@ public enum ProviderVariants {
             defaultAPIKey: accessToken,
             apiVersion: apiVersion,
             extraHeaders: ["anthropic-beta": beta],
-            authHeaderBuilder: { token in ["authorization": "Bearer \(token)"] }
+            authHeaderBuilder: { token in ["authorization": "Bearer \(token)"] },
+            systemPromptPrefix: "You are Claude Code, Anthropic's official CLI for Claude."
         )
     }
 
