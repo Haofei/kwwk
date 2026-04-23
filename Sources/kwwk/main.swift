@@ -4,6 +4,7 @@ import Darwin
 #elseif canImport(Glibc)
 import Glibc
 #endif
+import KWWKAgent
 import KWWKCli
 
 /// `kwwk` — coding-agent CLI. Dispatches on argv:
@@ -12,19 +13,25 @@ import KWWKCli
 ///   kwwk login              → TUI-driven OAuth / API-key login
 ///   kwwk -p <prompt>        → one-shot, non-interactive run (stdout = reply)
 ///   kwwk --help             → usage
+///
+/// `--thinking <off|minimal|low|medium|high|xhigh>` is a global flag that
+/// applies to both the TUI and headless modes. Default is `medium`.
 @main
 struct KwwkCLI {
     static func main() async {
-        let args = Array(CommandLine.arguments.dropFirst())
+        var args = Array(CommandLine.arguments.dropFirst())
+        let thinkingLevel: ThinkingLevel
+        (args, thinkingLevel) = extractThinking(args)
+
         let subcommand = args.first
 
         switch subcommand {
         case nil:
-            await runOrExit { try await KWWK.runCodingTUI() }
+            await runOrExit { try await KWWK.runCodingTUI(thinkingLevel: thinkingLevel) }
         case "login":
             await runOrExit { try await KWWK.runLogin() }
         case "-p", "--print":
-            await runPrint(rest: Array(args.dropFirst()))
+            await runPrint(rest: Array(args.dropFirst()), thinkingLevel: thinkingLevel)
         case "-h", "--help":
             printUsage()
         default:
@@ -39,16 +46,45 @@ struct KwwkCLI {
         kwwk — coding-agent CLI
 
         usage:
-          kwwk                      launch the interactive coding TUI
-          kwwk login                log in to an OAuth provider
-          kwwk -p <prompt>          run a one-shot prompt and print the reply
-          kwwk -p                   read the prompt from stdin
-          kwwk --help               show this message
+          kwwk                        launch the interactive coding TUI
+          kwwk login                  log in to an OAuth provider
+          kwwk -p <prompt>            run a one-shot prompt and print the reply
+          kwwk -p                     read the prompt from stdin
+          kwwk --help                 show this message
+
+        global options:
+          --thinking <level>          reasoning effort: off, minimal, low,
+                                      medium (default), high, xhigh
 
         Credentials are read from the OAuth store at ~/.kwwk/oauth.json.
         Run `kwwk login` once to register a provider (OAuth subscription
         or API key).
         """)
+    }
+
+    /// Pull `--thinking <level>` out of argv and return the remaining args
+    /// plus the parsed level. A missing flag defaults to `.medium`; an
+    /// invalid value exits with usage.
+    static func extractThinking(_ argv: [String]) -> ([String], ThinkingLevel) {
+        var out: [String] = []
+        var level: ThinkingLevel = .medium
+        var i = 0
+        while i < argv.count {
+            if argv[i] == "--thinking" {
+                guard i + 1 < argv.count, let parsed = ThinkingLevel(rawValue: argv[i + 1]) else {
+                    FileHandle.standardError.write(Data(
+                        "kwwk: --thinking needs one of: off, minimal, low, medium, high, xhigh\n".utf8
+                    ))
+                    Foundation.exit(2)
+                }
+                level = parsed
+                i += 2
+            } else {
+                out.append(argv[i])
+                i += 1
+            }
+        }
+        return (out, level)
     }
 
     /// Handle `-p` / `--print`. Everything after the flag is joined into
@@ -60,7 +96,7 @@ struct KwwkCLI {
     /// missing credentials, stream error) still print a one-line message
     /// to stderr so a non-zero exit isn't mysterious. Exit codes: 2 = bad
     /// invocation, 1 = runtime/auth failure, 0 = success.
-    static func runPrint(rest: [String]) async {
+    static func runPrint(rest: [String], thinkingLevel: ThinkingLevel) async {
         let prompt: String
         if rest.isEmpty || rest == ["-"] {
             // Use fd 0 directly instead of `fileno(stdin)` — on Linux
@@ -86,7 +122,7 @@ struct KwwkCLI {
         }
 
         do {
-            let code = try await KWWK.runHeadless(prompt: prompt)
+            let code = try await KWWK.runHeadless(prompt: prompt, thinkingLevel: thinkingLevel)
             Foundation.exit(code)
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"

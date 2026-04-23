@@ -26,7 +26,8 @@ public enum KWWK {
     public static func runCodingTUI(
         cwd: String? = nil,
         tools: CodingTools = .all,
-        autoCompactThreshold: Double? = 0.75
+        autoCompactThreshold: Double? = 0.75,
+        thinkingLevel: ThinkingLevel = .medium
     ) async throws {
         let resolved = try await resolveAgentAuth()
         let workDir = cwd ?? FileManager.default.currentDirectoryPath
@@ -36,7 +37,8 @@ public enum KWWK {
             cwd: workDir,
             tools: tools,
             apiKeyResolver: resolved.apiKeyResolver,
-            autoCompactThreshold: autoCompactThreshold
+            autoCompactThreshold: autoCompactThreshold,
+            thinkingLevel: thinkingLevel
         )
     }
 
@@ -64,13 +66,15 @@ public enum KWWK {
     public static func runHeadless(
         prompt: String,
         cwd: String? = nil,
-        tools: CodingTools = .all
+        tools: CodingTools = .all,
+        thinkingLevel: ThinkingLevel = .medium
     ) async throws -> Int32 {
         let workDir = cwd ?? FileManager.default.currentDirectoryPath
         return try await runHeadlessInternal(
             prompt: prompt,
             cwd: workDir,
-            tools: tools
+            tools: tools,
+            thinkingLevel: thinkingLevel
         )
     }
 }

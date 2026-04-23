@@ -13,7 +13,8 @@ func runCodingTUIInternal(
     cwd: String,
     tools: CodingTools,
     apiKeyResolver: (@Sendable (String) async -> String?)? = nil,
-    autoCompactThreshold: Double? = 0.75
+    autoCompactThreshold: Double? = 0.75,
+    thinkingLevel: ThinkingLevel = .medium
 ) async throws {
     // --- agent + background manager -------------------------------------
     let bgManager = BackgroundTaskManager()
@@ -36,7 +37,7 @@ func runCodingTUIInternal(
     // isn't reasoning-capable, so non-thinking models pay no cost and
     // `/model` switches flow naturally in either direction. Toggle via
     // `/thinking off` (or `high` / `xhigh` for thornier problems).
-    agent.state.thinkingLevel = .medium
+    agent.state.thinkingLevel = thinkingLevel
 
     // --- TUI (shared layout) --------------------------------------------
     // Inline render mode — the frame anchors at the current cursor and

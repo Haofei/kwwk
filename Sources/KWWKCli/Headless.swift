@@ -17,10 +17,18 @@ import KWWKAgent
 ///
 /// Credentials are resolved from the OAuth store exactly like
 /// `runCodingTUIInternal` — whichever provider `kwwk login` last wrote wins.
+///
+/// `@MainActor` matches the TUI entry point so the headless path can
+/// reuse `AutoCompactController` (which is main-actor-isolated) without
+/// cross-actor hops. The runtime impact is zero — `kwwk -p` is one-shot
+/// and the main actor isn't serving UI work.
+@MainActor
 func runHeadlessInternal(
     prompt text: String,
     cwd: String,
-    tools: CodingTools
+    tools: CodingTools,
+    thinkingLevel: ThinkingLevel = .medium,
+    autoCompactThreshold: Double? = 0.75
 ) async throws -> Int32 {
     let resolved = try await resolveAgentAuth()
 
@@ -36,7 +44,27 @@ func runHeadlessInternal(
     if let apiKeyResolver = resolved.apiKeyResolver {
         agent.apiKeyResolver = apiKeyResolver
     }
-    agent.state.thinkingLevel = .medium
+    agent.state.thinkingLevel = thinkingLevel
+
+    // Auto-compact: watch per-turn usage and summarize the transcript
+    // when it approaches the model's contextWindow. Without this, long
+    // runs (zork, ML autotune, blind-maze exploration) blow past the
+    // context limit mid-reasoning. All UI callbacks are no-ops — in
+    // headless mode we intentionally don't emit compact chrome to
+    // stdout/stderr; stop-reason reporting stays exclusively on the
+    // assistant-message path.
+    let autoCompact = AutoCompactController(
+        agent: agent,
+        backgroundManager: bgManager,
+        sessionId: sessionId,
+        threshold: autoCompactThreshold,
+        onStatusChange: { _ in },
+        onUsageChange: { _ in },
+        onCompactFinished: { _ in }
+    )
+    agent.betweenTurns = { context, _ in
+        await autoCompact.maybeCompactInline(context: context)
+    }
 
     // Shared mutable state carried out of the @Sendable listener. All
     // reads/writes go through the lock — listener callbacks can fire on
@@ -75,6 +103,11 @@ func runHeadlessInternal(
         default:
             break
         }
+        // `observe` fires a post-run compact if the final turn crossed
+        // the threshold — a no-op for one-shot runs that ended cleanly
+        // under the limit, essential for chained tool-use runs that
+        // just squeaked past it.
+        await autoCompact.observe(event)
     }
     defer { unsubscribe() }
 
