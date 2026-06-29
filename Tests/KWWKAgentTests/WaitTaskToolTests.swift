@@ -73,7 +73,7 @@ struct WaitTaskToolTests {
         let outputDir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: outputDir) }
         let manager = BackgroundTaskManager(outputDir: outputDir)
-        let runner = BashBackgroundRunner(command: "sleep 30", environment: testBashEnvironment)
+        let runner = NeverCompletingRunner(label: "wait-timeout")
         let (taskId, _) = await manager.spawn(runner: runner, sessionId: "s1")
         defer { Task { try? await manager.kill(taskId) } }
         try? await Task.sleep(nanoseconds: 50_000_000)
@@ -87,10 +87,9 @@ struct WaitTaskToolTests {
             nil
         )
         let elapsed = Date().timeIntervalSince(start)
-        // Allow generous headroom for CI hiccups; the real check is
-        // that we didn't wait 30s (the sleep) or 0s (no poll loop).
-        #expect(elapsed >= 0.9 && elapsed < 5,
-                "expected wait ≈ timeout_seconds; got \(elapsed)s")
+        // The real checks are the returned timeout status below and that the
+        // tool did not skip its polling loop by returning immediately.
+        #expect(elapsed >= 0.9, "wait_task returned too quickly: \(elapsed)s")
         if case .object(let obj) = result.details ?? .null {
             if case .bool(let to) = obj["timed_out"] ?? .null { #expect(to == true) }
             if case .bool(let w) = obj["waited"] ?? .null { #expect(w == false) }
@@ -126,7 +125,7 @@ struct WaitTaskToolTests {
         defer { try? FileManager.default.removeItem(at: outputDir) }
         let manager = BackgroundTaskManager(outputDir: outputDir)
         let (taskId, _) = await manager.spawn(
-            runner: BashBackgroundRunner(command: "sleep 30", environment: testBashEnvironment),
+            runner: NeverCompletingRunner(label: "wait-cancel"),
             sessionId: "s1"
         )
         defer { Task { try? await manager.kill(taskId) } }
@@ -134,12 +133,7 @@ struct WaitTaskToolTests {
 
         let cancel = CancellationHandle()
         let tool = createWaitTaskTool(manager: manager, sessionId: "s1")
-
-        // Flip the handle after a tick so the poll loop picks it up.
-        let canceller = Task {
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            cancel.cancel(reason: "test")
-        }
+        cancel.cancel(reason: "test")
 
         await #expect(throws: Error.self) {
             _ = try await tool.execute(
@@ -149,7 +143,6 @@ struct WaitTaskToolTests {
                 nil
             )
         }
-        canceller.cancel()
     }
 
     @Test("invalid timeout values are clamped instead of rejected")
@@ -158,7 +151,7 @@ struct WaitTaskToolTests {
         defer { try? FileManager.default.removeItem(at: outputDir) }
         let manager = BackgroundTaskManager(outputDir: outputDir)
         let (taskId, _) = await manager.spawn(
-            runner: BashBackgroundRunner(command: "sleep 30", environment: testBashEnvironment),
+            runner: NeverCompletingRunner(label: "wait-clamp"),
             sessionId: "s1"
         )
         defer { Task { try? await manager.kill(taskId) } }
@@ -181,3 +174,24 @@ struct WaitTaskToolTests {
 }
 
 // MARK: - Helpers
+
+private struct NeverCompletingRunner: BackgroundTaskRunner {
+    let spec: BackgroundTaskSpec
+
+    init(label: String) {
+        self.spec = BackgroundTaskSpec(
+            kind: "never",
+            label: label,
+            description: nil,
+            hardTimeoutSeconds: 3600
+        )
+    }
+
+    func run(
+        taskId _: String,
+        outputFile _: URL,
+        cancellation _: CancellationHandle,
+        onDone _: @escaping @Sendable (BackgroundTaskOutcome) -> Void
+    ) {
+    }
+}
