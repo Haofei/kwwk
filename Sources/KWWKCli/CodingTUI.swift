@@ -199,8 +199,7 @@ func runCodingTUIInternal(
         )
     }
 
-    var frameMode: CodingFrameMode = .idle
-    var runningBackgroundTasks = 0
+    let frameStatus = FrameStatusState()
 
     let updateFrameStatus: @MainActor @Sendable () -> Void = {
         let capacityHint = formatCapacityHint(
@@ -218,9 +217,9 @@ func runCodingTUIInternal(
         )
         let goalSnap = goalStore.snapshot()
         frame.stateLine = codingFrameStateLine(
-            mode: frameMode,
+            mode: frameStatus.mode,
             isStreaming: agent.state.isStreaming,
-            runningBackgroundTasks: runningBackgroundTasks,
+            runningBackgroundTasks: frameStatus.runningBackgroundTasks,
             queuedPrompts: agent.queuedSteeringCount(),
             goalObjective: goalSnap.status == .active ? goalSnap.objective : nil,
             spinner: frame.spinner
@@ -358,11 +357,11 @@ func runCodingTUIInternal(
         }
     }
 
-    var isAutoCompacting = false
-    // Set for the duration of a manual `/compact` (via the SlashContext
-    // `setCompacting` hook). Mirrors `isAutoCompacting` in the Enter busy gate
-    // so a prompt typed mid-compact queues instead of racing the compactor.
-    var isManualCompacting = false
+    // `isAutoCompacting` / `isManualCompacting` live on `frameStatus`. The
+    // latter is set for the duration of a manual `/compact` (via the
+    // SlashContext `setCompacting` hook) and mirrors the auto flag in the Enter
+    // busy gate so a prompt typed mid-compact queues instead of racing the
+    // compactor.
     updateFrameStatus()
 
     // Retry bookkeeping for `/retry`: remembers the last submitted prompt and
@@ -392,7 +391,7 @@ func runCodingTUIInternal(
             while !Task.isCancelled {
                 let running = await bgManager.list(sessionId: sessionId)
                     .filter { $0.status == .running }.count
-                runningBackgroundTasks = running
+                frameStatus.runningBackgroundTasks = running
                 updateFrameStatus()
                 runner.tui.requestRender()
                 // Nothing left to animate the count → stop. A later turn or
@@ -422,7 +421,7 @@ func runCodingTUIInternal(
             case .agentStart:
                 break
             case .agentEnd(_, let summary):
-                frameMode = .idle
+                frameStatus.mode = .idle
                 // A genuine failure (retries exhausted, turn cap, abort) returns
                 // NORMALLY from `agent.prompt()` — the executor error is caught
                 // inside `runLifecycle` and surfaced as a synthetic `.agentEnd`
@@ -504,15 +503,15 @@ func runCodingTUIInternal(
                     }
                 }
             case .compactStart(let count, _):
-                isAutoCompacting = true
-                frameMode = .compacting(messageCount: count)
+                frameStatus.isAutoCompacting = true
+                frameStatus.mode = .compacting(messageCount: count)
                 runner.tui.commit([
                     "",
                     Style.dimmed("  ◐ auto-compacting \(count) messages…"),
                 ])
             case .compactEnd(let outcome):
-                isAutoCompacting = false
-                frameMode = .idle
+                frameStatus.isAutoCompacting = false
+                frameStatus.mode = .idle
                 switch outcome {
                 case .compacted(let n, let hasLedger):
                     runner.tui.commit(renderCompactBoundary(
@@ -536,13 +535,13 @@ func runCodingTUIInternal(
                     ])
                 }
             case .streamRetry(let attempt, let delayMs, let reason):
-                frameMode = .retrying(
+                frameStatus.mode = .retrying(
                     attempt: attempt,
                     until: Date().addingTimeInterval(Double(delayMs) / 1000.0),
                     reason: reason
                 )
             case .messageStart:
-                frameMode = .idle
+                frameStatus.mode = .idle
             case .messageUpdate:
                 break
             default: break
@@ -689,11 +688,11 @@ func runCodingTUIInternal(
             runner.tui.requestRender()
         },
         setCompacting: { active in
-            isManualCompacting = active
+            frameStatus.isManualCompacting = active
             // Show the compacting spinner (frameMode.isActive drives the
             // dedicated spinner tick) for the whole round-trip, and clear back
             // to idle when it finishes.
-            frameMode = active ? .compacting(messageCount: agent.state.messages.count) : .idle
+            frameStatus.mode = active ? .compacting(messageCount: agent.state.messages.count) : .idle
             updateFrameStatus()
             runner.tui.requestRender()
         }
@@ -726,7 +725,7 @@ func runCodingTUIInternal(
             guard !text.isEmpty else { return }
 
             let parsed = SlashInput.parse(text)
-            let busy = agent.state.isStreaming || isAutoCompacting || isManualCompacting
+            let busy = agent.state.isStreaming || frameStatus.isAutoCompacting || frameStatus.isManualCompacting
 
             // Logged-out gate: with no registered provider a prompt has
             // nowhere to route — surface the /login hint instead of letting
@@ -938,7 +937,7 @@ func runCodingTUIInternal(
                 // "Ctrl-C to force quit" state line already tells the user a
                 // second press exits, so no extra scrollback notice here.
                 agent.abort()
-                frameMode = .aborting
+                frameStatus.mode = .aborting
                 agent.clearSteeringQueue()
                 if let t = retryArmTarget(
                     summary: nil,
@@ -993,7 +992,7 @@ func runCodingTUIInternal(
             }
             if agent.state.isStreaming {
                 agent.abort()
-                frameMode = .aborting
+                frameStatus.mode = .aborting
                 // Drop any queued-but-unstarted steer messages so they can't
                 // double-drain: without this the initial steering drain would
                 // still inject them AND /retry would resubmit, sending twice.
@@ -1021,7 +1020,7 @@ func runCodingTUIInternal(
                 .filter { $0.status == .running }.count
             if running > 0 {
                 await bgManager.killAll(sessionId: sessionId)
-                runningBackgroundTasks = 0
+                frameStatus.runningBackgroundTasks = 0
                 runner.tui.commit([
                     "",
                     Style.dimmed("  killed \(running) background \(running == 1 ? "task" : "tasks")"),
@@ -1048,7 +1047,7 @@ func runCodingTUIInternal(
     let spinnerTask = Task { @MainActor in
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 90_000_000)
-            guard agent.state.isStreaming || isAutoCompacting || frameMode.isActive else { continue }
+            guard agent.state.isStreaming || frameStatus.isAutoCompacting || frameStatus.mode.isActive else { continue }
             frame.tick()
             updateFrameStatus()
             runner.tui.requestRender()
@@ -1121,6 +1120,19 @@ final class WelcomeHeaderState: @unchecked Sendable {
 final class CtrlCState {
     static let window: TimeInterval = 1.5
     var lastPress: Date?
+}
+
+/// Holds the frame's live status: the animation/spinner mode and the running
+/// background-task count. Both are mutated from several @MainActor closures
+/// (keybindings, the event handler, the bg poll), so a reference type lets them
+/// share one storage without capturing a `var` (rejected under Swift 6 strict
+/// concurrency).
+@MainActor
+private final class FrameStatusState {
+    var mode: CodingFrameMode = .idle
+    var runningBackgroundTasks = 0
+    var isAutoCompacting = false
+    var isManualCompacting = false
 }
 
 /// Holds the on-demand background-task poll task so the @MainActor closures
