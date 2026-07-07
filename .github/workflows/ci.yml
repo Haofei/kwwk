@@ -7,7 +7,15 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-15
+    # macos-15 = oldest supported toolchain; macos-26 tracks the newest Swift,
+    # which is what `brew install` users compile the release tarball with.
+    # Newer compilers enforce stricter concurrency checking, so green on the
+    # newest image is what guarantees source builds don't break on user machines.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: swift build
@@ -16,8 +24,14 @@ jobs:
         run: swift test
 
   build-linux:
+    # 6.1 = the Package.swift tools-version floor; latest mirrors what
+    # from-source users on current toolchains hit.
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["6.1", "latest"]
     runs-on: ubuntu-latest
-    container: swift:6.1
+    container: swift:${{ matrix.swift }}
     steps:
       - uses: actions/checkout@v4
       - name: swift build

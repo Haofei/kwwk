@@ -9,13 +9,27 @@ permissions:
   contents: write
 
 jobs:
+  # Verify the tag builds on BOTH toolchain extremes before anything is
+  # published: macos-26 tracks the newest Swift (what `brew install` users
+  # compile with — strictest concurrency checking), macos-15 guards the old
+  # floor. The release job below only runs if both pass, so a tag that fails
+  # either never reaches the tap.
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release build
+        run: swift build -c release --product kwwk
+
   release:
+    needs: verify
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify release build
-        run: swift build -c release --product kwwk
 
       - name: Compute tarball SHA256
         id: hash
