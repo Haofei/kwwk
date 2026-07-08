@@ -90,13 +90,35 @@ enum GoalMode {
         """
     }
 
-    /// `🎯 <objective, truncated>` segment for the status line while active.
-    static func statusSegment(objective: String, max: Int = 48) -> String {
-        let flat = objective.replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespaces)
-        let shown = flat.count > max ? String(flat.prefix(max - 1)) + "…" : flat
-        return Theme.paint("🎯 \(shown)", Theme.accent, bold: true)
+    /// omp-style breadcrumb segment while a goal exists: state icon + the
+    /// fixed word "Goal" + compact lifetime token spend, colored by status —
+    /// `🎯 Goal 27K` (accent) while active, `⏸ Goal 27K` (warn) while paused,
+    /// `✓ Goal 27K` (success) in the brief complete window before the loop
+    /// drops the goal. Nil when there is no goal to advertise.
+    static func statusSegment(status: GoalStatus, tokensUsed: Int) -> String? {
+        let tokens = compactTokenCount(tokensUsed)
+        switch status {
+        case .active: return Theme.paint("🎯 Goal \(tokens)", Theme.accent, bold: true)
+        case .paused: return Theme.paint("⏸ Goal \(tokens)", Theme.warn, bold: true)
+        case .complete: return Theme.paint("✓ Goal \(tokens)", Theme.success, bold: true)
+        case .dropped: return nil
+        }
     }
+}
+
+/// Compact token count, ported from omp's `formatTokenCount`: one decimal
+/// below the first two digits of a unit (`9.5K`, `1.2M`), whole numbers above
+/// (`27K`, `120M`), trailing `.0` trimmed.
+func compactTokenCount(_ n: Int) -> String {
+    func oneDecimal(_ v: Double) -> String {
+        let s = String(format: "%.1f", v)
+        return s.hasSuffix(".0") ? String(s.dropLast(2)) : s
+    }
+    if n < 1_000 { return "\(n)" }
+    if n < 10_000 { return "\(oneDecimal(Double(n) / 1_000))K" }
+    if n < 1_000_000 { return "\(Int((Double(n) / 1_000).rounded()))K" }
+    if n < 10_000_000 { return "\(oneDecimal(Double(n) / 1_000_000))M" }
+    return "\(Int((Double(n) / 1_000_000).rounded()))M"
 }
 
 /// Loop action decided at `.agentEnd`. Pure — no side effects — so it is

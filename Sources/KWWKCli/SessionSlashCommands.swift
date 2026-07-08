@@ -25,6 +25,9 @@ struct SessionCommandContext {
     let terminalWidth: @MainActor @Sendable () -> Int
     /// Append lines to the terminal's native scrollback.
     let commit: @MainActor @Sendable ([String]) -> Void
+    /// Replace the entire retained transcript and repaint from scratch
+    /// (`TUI.replaceCommitted`) — omp's clear-and-redraw session swap.
+    let replaceTranscript: @MainActor @Sendable ([String]) -> Void
     let requestRender: @MainActor @Sendable () -> Void
     /// Re-derive the live tail from the transcript renderer.
     let recomputeTranscript: @MainActor @Sendable () -> Void
@@ -39,6 +42,9 @@ struct SessionCommandContext {
     /// The TUI's single submission path; `/retry` funnels resubmits through
     /// it so they drive the exact same streaming/steering UI.
     let submitBuiltPrompt: @MainActor @Sendable (String, [ImageContent]) -> Void
+    /// Open the rewind-to-message picker — the same opener double-Esc uses,
+    /// so `/rewind` and the key gesture stay behaviorally identical.
+    let openRewindSelector: @MainActor @Sendable () -> Void
 }
 
 /// Register the session-lifecycle slash commands. Called from
@@ -58,16 +64,19 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
     let dequeueCycle = ctx.dequeueCycle
     let terminalWidth = ctx.terminalWidth
     let commit = ctx.commit
+    let replaceTranscript = ctx.replaceTranscript
     let requestRender = ctx.requestRender
     let recomputeTranscript = ctx.recomputeTranscript
     let updateFrameStatus = ctx.updateFrameStatus
     let applyGoalContext = ctx.applyGoalContext
     let kickGoalContinuation = ctx.kickGoalContinuation
     let submitBuiltPrompt = ctx.submitBuiltPrompt
+    let openRewindSelector = ctx.openRewindSelector
 
     // `/resume` — restore a previous session into the running TUI. Opens an
     // arrow-key picker; on confirm it repoints persistence at the chosen
-    // session file, swaps the agent's message history, and repaints a recap.
+    // session file, swaps the agent's message history, and clears the screen,
+    // re-rendering the restored transcript in place of the outgoing one.
     registry.register(SlashCommand(
         name: "resume",
         description: "Restore a previous session",
@@ -98,10 +107,8 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
                         recorderBox.unsubscribe = recorder.attach(to: agent)
                         recorderBox.sessionId = info.id
 
-                        // Swap the live context + commit a readable recap to
-                        // scrollback. Native scrollback can't be cleared, so
-                        // the prior conversation stays above and the restored
-                        // one is appended below a labeled separator.
+                        // Swap the live context; the repaint below replaces
+                        // the on-screen transcript with the restored one.
                         agent.state.messages = loaded.messages
                         // Clear per-session transient state so a pending /retry,
                         // queued steer, attachment, or dequeue cursor from the
@@ -118,18 +125,23 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
                         // goalStore after its idle wait and bails once inactive.
                         goalStore.stop()
                         applyGoalContext()
-                        var recap: [String] = [
-                            "",
-                            Theme.borderText(String(repeating: "─", count: max(8, terminalWidth() - 2))),
-                            Theme.accentText("↻ resumed session \(info.id.prefix(8)) · \(loaded.messages.count) messages", bold: false),
-                        ]
-                        let snapshot = TranscriptSnapshot.render(loaded.messages, width: terminalWidth())
-                        if !snapshot.isEmpty { recap.append(contentsOf: [""] + snapshot) }
-                        commit(recap)
-
+                        // Close first: the modal's restore hook drains any
+                        // commits queued behind it, and the replace below must
+                        // be the last writer so nothing stale lands after it.
                         modal.close()
                         recomputeTranscript()
                         updateFrameStatus()
+
+                        // omp's session-switch treatment: clear the screen
+                        // (and scrollback, where the terminal allows) and
+                        // re-render the restored transcript in place of the
+                        // outgoing one; a trailing note names the session.
+                        var snapshot = TranscriptSnapshot.render(loaded.messages, width: terminalWidth())
+                        snapshot.append(contentsOf: [
+                            "",
+                            Theme.accentText("↻ resumed session \(info.id.prefix(8)) · \(loaded.messages.count) messages", bold: false),
+                        ])
+                        replaceTranscript(snapshot)
                         requestRender()
                     }
                 },
@@ -185,6 +197,16 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
         }
     ))
 
+    // `/rewind` — pick a prior user message, truncate the conversation to just
+    // before it, and put its text back into the editor for edit-and-resubmit.
+    // The same selector double-Esc opens; idle-gated by the dispatcher like
+    // every slash command, matching the key gesture's idle-only trigger.
+    registry.register(SlashCommand(
+        name: "rewind",
+        description: "Rewind the conversation to a prior message",
+        handler: { _, _ in openRewindSelector() }
+    ))
+
     // `/goal` — autonomous goal mode (in-memory, session-scoped).
     //   /goal <text>      set + start the objective (kicks the loop)
     //   /goal             show the current goal
@@ -197,16 +219,19 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
             let arg = args.trimmingCharacters(in: .whitespacesAndNewlines)
             let lower = arg.lowercased()
 
-            // Show current goal.
+            // Show current goal — omp-style detail lines (Objective / Status /
+            // Tokens) rather than one packed sentence.
             if arg.isEmpty {
                 let s = goalStore.snapshot()
                 switch s.status {
-                case .active:
-                    ctx.notify(Style.dimmed("  🎯 goal (active): \(s.objective)"))
-                case .paused:
-                    ctx.notify(Style.dimmed("  🎯 goal (paused — cap hit): \(s.objective) · /goal resume to keep going"))
-                case .complete:
-                    ctx.notify(Style.dimmed("  🎯 goal: complete"))
+                case .active, .paused, .complete:
+                    var status = s.status.rawValue
+                    if s.status == .paused { status += " — /goal resume to keep going" }
+                    ctx.notifyBlock([
+                        Style.dimmed("  Objective: \(s.objective)"),
+                        Style.dimmed("  Status: \(status)"),
+                        Style.dimmed("  Tokens: \(s.tokensUsed.formatted(.number.grouping(.automatic)))"),
+                    ])
                 case .dropped:
                     ctx.notify(Style.dimmed("  /goal: no active goal — /goal <objective> to start one"))
                 }

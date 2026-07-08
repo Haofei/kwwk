@@ -140,6 +140,25 @@ final class TUI: @unchecked Sendable {
         }
     }
 
+    /// Replace the entire retained transcript with `lines` and repaint from
+    /// scratch — omp's branch/rewind treatment (`chatContainer.clear()` +
+    /// `renderInitialMessages({clearTerminalHistory: true})`). On a direct
+    /// terminal this clears the screen AND native scrollback (ED3) and
+    /// replays `lines`, so scrolling up shows only the new transcript. Inside
+    /// a multiplexer ED3 is hostile, so the visible pane is snapped instead
+    /// and the pre-replacement history stays in the pane's own scrollback —
+    /// the same constraint omp accepts (it skips clearScrollback there too).
+    func replaceCommitted(_ lines: [String]) {
+        lock.withLock {
+            pendingCommits.removeAll()
+            committedLines = lines
+            if committedLines.count > TUI.maxCommittedLines {
+                committedLines.removeFirst(committedLines.count - TUI.maxCommittedLines)
+            }
+        }
+        repaintForResize()
+    }
+
     func setClearOnShrink(_ value: Bool) {
         lock.withLock { clearOnShrink = value }
     }

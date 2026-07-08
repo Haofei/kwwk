@@ -53,6 +53,10 @@ public struct GoalSnapshot: Sendable, Equatable {
     /// Consecutive hidden auto-continuations performed since the last real
     /// user message. Compared against the guardrail cap.
     public var autoContinueCount: Int
+    /// Total tokens consumed by turns that ran while this goal was active.
+    /// Accumulated at each agent-end from the run summary; shown in the
+    /// status line (omp-style `🎯 Goal 27K`) and `/goal`.
+    public var tokensUsed: Int
 }
 
 /// Session-scoped, in-memory ONLY. Shared by reference between the `goal`
@@ -66,15 +70,22 @@ public final class GoalStore: @unchecked Sendable {
     private var _objective = ""
     private var _status: GoalStatus = .dropped
     private var _autoContinueCount = 0
+    private var _tokensUsed = 0
 
     public init() {}
 
     public func start(_ objective: String) {
-        lock.withLock { _objective = objective; _status = .active; _autoContinueCount = 0 }
+        lock.withLock { _objective = objective; _status = .active; _autoContinueCount = 0; _tokensUsed = 0 }
     }
     /// User cleared the goal (`/goal off`). Fully resets.
     public func stop() {
-        lock.withLock { _status = .dropped; _objective = ""; _autoContinueCount = 0 }
+        lock.withLock { _status = .dropped; _objective = ""; _autoContinueCount = 0; _tokensUsed = 0 }
+    }
+    /// Attribute a finished turn's token spend to the goal. Survives a pause
+    /// (the count is the goal's lifetime spend, not per-stretch) and resets
+    /// with the goal itself in `start`/`stop`.
+    public func addTokens(_ n: Int) {
+        lock.withLock { _tokensUsed += n }
     }
     /// Model called `goal({op:"complete"})`. Compare-and-set from `.active` only,
     /// so a stale/in-flight turn (or any non-goal turn — the tool is always
@@ -111,7 +122,7 @@ public final class GoalStore: @unchecked Sendable {
         lock.withLock { if _autoContinueCount > 0 { _autoContinueCount -= 1 } }
     }
     public func snapshot() -> GoalSnapshot {
-        lock.withLock { GoalSnapshot(objective: _objective, status: _status, autoContinueCount: _autoContinueCount) }
+        lock.withLock { GoalSnapshot(objective: _objective, status: _status, autoContinueCount: _autoContinueCount, tokensUsed: _tokensUsed) }
     }
     public var isActive: Bool { lock.withLock { _status == .active } }
 }

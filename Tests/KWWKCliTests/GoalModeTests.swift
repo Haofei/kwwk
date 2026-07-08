@@ -67,11 +67,40 @@ struct GoalModeTests {
         #expect(ctx.contains("operator<=>"))
         #expect(ctx.contains("vector<Widget>"))
     }
-    @Test("status segment truncates")
+    @Test("status segment: omp-style icon + Goal + compact tokens, per status")
     func segment() {
-        let seg = GoalMode.statusSegment(objective: String(repeating: "x", count: 100), max: 20)
-        #expect(ANSI.stripEscapes(seg).contains("…"))
-        #expect(ANSI.stripEscapes(seg).hasPrefix("🎯"))
+        let active = GoalMode.statusSegment(status: .active, tokensUsed: 26_594)
+        #expect(ANSI.stripEscapes(active ?? "") == "🎯 Goal 27K")
+        let paused = GoalMode.statusSegment(status: .paused, tokensUsed: 0)
+        #expect(ANSI.stripEscapes(paused ?? "") == "⏸ Goal 0")
+        let complete = GoalMode.statusSegment(status: .complete, tokensUsed: 1_200)
+        #expect(ANSI.stripEscapes(complete ?? "") == "✓ Goal 1.2K")
+        #expect(GoalMode.statusSegment(status: .dropped, tokensUsed: 5) == nil)
+    }
+    @Test("compact token count matches omp's formatTokenCount tiers")
+    func tokenCount() {
+        #expect(compactTokenCount(0) == "0")
+        #expect(compactTokenCount(999) == "999")
+        #expect(compactTokenCount(1_000) == "1K")
+        #expect(compactTokenCount(9_540) == "9.5K")
+        #expect(compactTokenCount(26_594) == "27K")
+        #expect(compactTokenCount(999_600) == "1000K")
+        #expect(compactTokenCount(1_200_000) == "1.2M")
+        #expect(compactTokenCount(27_000_000) == "27M")
+    }
+    @Test("goal store accumulates token spend, resets with the goal")
+    func tokenSpend() {
+        let store = GoalStore()
+        store.start("obj")
+        store.addTokens(10_000)
+        store.addTokens(5_000)
+        #expect(store.snapshot().tokensUsed == 15_000)
+        store.pauseForCap()
+        #expect(store.snapshot().tokensUsed == 15_000)
+        store.stop()
+        #expect(store.snapshot().tokensUsed == 0)
+        store.start("next")
+        #expect(store.snapshot().tokensUsed == 0)
     }
     @MainActor
     @Test("renderer hides the hidden continuation, shows a normal message")

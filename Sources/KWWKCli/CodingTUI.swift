@@ -209,19 +209,22 @@ func runCodingTUIInternal(
             ),
             threshold: autoCompactThreshold
         )
-        frame.breadcrumb = promptBreadcrumb(model: agent.state.model, branch: gitBranch)
+        let goalSnap = goalStore.snapshot()
+        frame.breadcrumb = promptBreadcrumb(
+            model: agent.state.model,
+            branch: gitBranch,
+            goalSegment: GoalMode.statusSegment(status: goalSnap.status, tokensUsed: goalSnap.tokensUsed)
+        )
         frame.metaRight = promptMetaLabel(
             model: agent.state.model,
             thinkingLevel: agent.state.thinkingLevel,
             capacityHint: capacityHint
         )
-        let goalSnap = goalStore.snapshot()
         frame.stateLine = codingFrameStateLine(
             mode: frameStatus.mode,
             isStreaming: agent.state.isStreaming,
             runningBackgroundTasks: frameStatus.runningBackgroundTasks,
             queuedPrompts: agent.queuedSteeringCount(),
-            goalObjective: goalSnap.status == .active ? goalSnap.objective : nil,
             spinner: frame.spinner
         )
         // Surface the pending queue as a live list above the input (omp-style).
@@ -446,16 +449,25 @@ func runCodingTUIInternal(
 
                 // --- goal mode autonomous loop ---
                 let gsnap = goalStore.snapshot()
+                // Attribute this turn's spend to the goal while it drove the
+                // turn — still active, or completed by the model mid-turn (so
+                // the final "done" notice reports the full spend). Feeds the
+                // omp-style `🎯 Goal 27K` breadcrumb segment and `/goal`.
+                if gsnap.status == .active || gsnap.status == .complete {
+                    goalStore.addTokens(summary.usage.totalTokens)
+                }
                 if gsnap.status == .complete {
                     // The model called goal({op:"complete"}) during this turn.
                     // Drop the goal so this branch fires exactly once — .complete
                     // has no other exit transition, so without clearing it the
                     // done notice would re-print on every subsequent turn.
+                    // Read the spend before stop() zeroes it with the goal.
+                    let spent = compactTokenCount(goalStore.snapshot().tokensUsed)
                     goalStore.stop()
                     applyGoalContext()
                     runner.tui.commit([
                         "",
-                        Style.dimmed("  🎯 goal complete — autonomous loop stopped."),
+                        Style.dimmed("  🎯 goal complete (\(spent) tokens) — autonomous loop stopped."),
                     ])
                 } else {
                     switch goalLoopDecision(
@@ -588,6 +600,27 @@ func runCodingTUIInternal(
         }
     }
 
+    // Rewind-to-message selector, opened by double-Esc from idle and by
+    // `/rewind`. Defined once here so both trigger points share the exact
+    // same opener (candidate list, truncation, persistence, recap).
+    let openRewind: @MainActor @Sendable () -> Void = {
+        openRewindSelector(
+            agent: agent,
+            modal: modal,
+            frame: frame,
+            recorderBox: recorderBox,
+            retry: retry,
+            attachments: attachments,
+            dequeueCycle: dequeueCycle,
+            terminalWidth: { runner.terminal.width },
+            commit: { runner.tui.commit($0) },
+            replaceTranscript: { runner.tui.replaceCommitted($0) },
+            recomputeTranscript: recomputeTranscript,
+            updateFrameStatus: updateFrameStatus,
+            requestRender: { runner.tui.requestRender() }
+        )
+    }
+
     // Slash command registry. Handlers get a `SlashContext` with the agent,
     // modal host, and a `notify` hook that appends into retained history.
     let slashRegistry = SlashCommandRegistry()
@@ -614,12 +647,14 @@ func runCodingTUIInternal(
         dequeueCycle: dequeueCycle,
         terminalWidth: { runner.terminal.width },
         commit: { runner.tui.commit($0) },
+        replaceTranscript: { runner.tui.replaceCommitted($0) },
         requestRender: { runner.tui.requestRender() },
         recomputeTranscript: recomputeTranscript,
         updateFrameStatus: updateFrameStatus,
         applyGoalContext: applyGoalContext,
         kickGoalContinuation: kickGoalContinuation,
-        submitBuiltPrompt: submitBuiltPrompt
+        submitBuiltPrompt: submitBuiltPrompt,
+        openRewindSelector: openRewind
     ))
 
     let slashCommandInfos = slashRegistry.all.map {
@@ -979,18 +1014,31 @@ func runCodingTUIInternal(
         runner.tui.forceRepaint()
     }
 
-    // Esc. Three modes of operation:
+    // Esc. Four modes of operation:
     //   1. modal open → cancel the modal (no agent state touched).
     //   2. agent streaming → abort the current generation.
     //   3. idle AND background tasks running → kill them all.
-    //   4. idle, no bg tasks → no-op (Ctrl-C is the only way out).
+    //   4. idle, no bg tasks, empty editor → arm double-Esc; a second press
+    //      within the window opens the rewind-to-message selector.
+    //
+    // Double-Esc invariant: only an Esc that did NOTHING else may count as a
+    // tap of the double-tap. Every branch that consumes the press for another
+    // purpose (modal cancel, abort, bg kill) — and any press with draft text
+    // in the editor — resets the arm, so cancelling a modal and then pressing
+    // Esc again can never surprise-open the selector.
+    let doubleEsc = DoubleEscState()
     runner.bind(.init("escape")) { _ in
         Task { @MainActor in
+            // Timestamp captured before the bg-manager hop below, so the
+            // 500ms window measures key-to-key time, not actor latency.
+            let now = Date()
             if modal.isOpen {
+                doubleEsc.lastPress = nil
                 modal.routeCancel()
                 return
             }
             if agent.state.isStreaming {
+                doubleEsc.lastPress = nil
                 agent.abort()
                 frameStatus.mode = .aborting
                 // Drop any queued-but-unstarted steer messages so they can't
@@ -1019,6 +1067,7 @@ func runCodingTUIInternal(
             let running = await bgManager.list(sessionId: sessionId)
                 .filter { $0.status == .running }.count
             if running > 0 {
+                doubleEsc.lastPress = nil
                 await bgManager.killAll(sessionId: sessionId)
                 frameStatus.runningBackgroundTasks = 0
                 runner.tui.commit([
@@ -1027,9 +1076,32 @@ func runCodingTUIInternal(
                 ])
                 updateFrameStatus()
                 runner.tui.requestRender()
+                return
             }
-            // No bg tasks, nothing streaming → Esc does nothing. The
-            // user exits via Ctrl-C.
+            // Idle fall-through: nothing streaming, no bg tasks. Rewind arms
+            // only with an empty editor while no compaction (auto or manual)
+            // is mutating the transcript — any other idle Esc resets the arm
+            // so a stray earlier press can't complete the double-tap.
+            // `isStreaming` is re-checked because the bg-manager hop above is
+            // a suspension point: a notification-kicked turn that started
+            // during it must not get the picker opened over it (whatever
+            // slips past even this gets force-aborted by the confirm handler
+            // — the rewind is forced, omp-style).
+            guard frame.input.value.isEmpty,
+                  !agent.state.isStreaming,
+                  !frameStatus.isAutoCompacting, !frameStatus.isManualCompacting
+            else {
+                doubleEsc.lastPress = nil
+                return
+            }
+            let armed = doubleEsc.lastPress
+                .map { now.timeIntervalSince($0) < DoubleEscState.window } ?? false
+            if armed {
+                doubleEsc.lastPress = nil
+                openRewind()
+            } else {
+                doubleEsc.lastPress = now
+            }
         }
     }
 
@@ -1133,6 +1205,17 @@ private final class FrameStatusState {
     var runningBackgroundTasks = 0
     var isAutoCompacting = false
     var isManualCompacting = false
+}
+
+/// Tracks the last idle no-op Esc press so a second press within `window`
+/// opens the rewind-to-message selector (omp's double-Esc). Only an Esc that
+/// did nothing else records a press — every consuming branch of the Esc
+/// ladder resets `lastPress` (see the binding). Reference type so the
+/// @MainActor keybinding closure can mutate it under Swift 6 concurrency.
+@MainActor
+final class DoubleEscState {
+    static let window: TimeInterval = 0.5
+    var lastPress: Date?
 }
 
 /// Holds the on-demand background-task poll task so the @MainActor closures
@@ -1415,14 +1498,19 @@ func gatePromptWhenLoggedOut(
 }
 
 /// Top-border breadcrumb for the prompt box: the live model id, then the
-/// git branch when inside a repo. Already styled. The logged-out sentinel
-/// (empty id) renders a "/login" hint instead of a blank label.
-private func promptBreadcrumb(model: Model, branch: String?) -> String {
+/// git branch when inside a repo, then the goal segment while a goal exists
+/// (omp keeps its goal indicator in this persistent status row, next to the
+/// model — not in the transient state line). Already styled. The logged-out
+/// sentinel (empty id) renders a "/login" hint instead of a blank label.
+private func promptBreadcrumb(model: Model, branch: String?, goalSegment: String?) -> String {
     var out = model.id.isEmpty
         ? Theme.faintText(loggedOutModelLabel)
         : Theme.accentText(model.id, bold: false)
     if let branch, !branch.isEmpty {
         out += Theme.faintText("  ⎇ \(branch)")
+    }
+    if let goalSegment {
+        out += "  " + goalSegment
     }
     return out
 }
@@ -1451,13 +1539,9 @@ private func codingFrameStateLine(
     isStreaming: Bool,
     runningBackgroundTasks: Int,
     queuedPrompts: Int,
-    goalObjective: String?,
     spinner: String
 ) -> String {
     var parts: [String] = []
-    if let goalObjective, !goalObjective.isEmpty {
-        parts.append(GoalMode.statusSegment(objective: goalObjective))
-    }
 
     switch mode {
     case .compacting(let count):

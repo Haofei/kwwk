@@ -50,6 +50,39 @@ struct TUIResizeTests {
     }
 }
 
+@Suite("TUI replaceCommitted")
+struct TUIReplaceCommittedTests {
+    @Test("replaceCommitted repaints with the new transcript only")
+    func replaceRepaints() async throws {
+        let terminal = VirtualTerminal(width: 40, height: 10)
+        let tui = TUI(terminal: terminal)
+        tui.addChild(TestLinesComponent(["prompt"]))
+        tui.start()
+        tui.commit(["old line A", "old line B"])
+        tui.requestRender()
+        await terminal.waitForRender()
+        #expect(terminal.getViewport().contains { $0.contains("old line A") })
+
+        tui.replaceCommitted(["kept line"])
+        await terminal.waitForRender()
+
+        let viewport = terminal.getViewport()
+        #expect(viewport.contains { $0.contains("kept line") })
+        #expect(!viewport.contains { $0.contains("old line A") })
+        #expect(!viewport.contains { $0.contains("old line B") })
+        #expect(viewport.contains { $0.contains("prompt") })
+
+        // A later resize repaint replays only the replaced transcript — the
+        // old lines must be gone from the retained history too.
+        terminal.resize(width: 42, height: 10)
+        await terminal.waitForRender()
+        let resized = terminal.getViewport()
+        #expect(resized.contains { $0.contains("kept line") })
+        #expect(!resized.contains { $0.contains("old line") })
+        tui.stop()
+    }
+}
+
 @Suite("TUI clearFrame")
 struct TUIClearFrameTests {
     @Test("clearFrame erases the live zone in place")
