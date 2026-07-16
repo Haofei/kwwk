@@ -108,4 +108,27 @@ struct GenerateModelsCoreTests {
         #expect(result.root.keys.contains("google-vertex"))
         #expect(result.root.count == 2)
     }
+
+    @Test("writes concise decimal prices")
+    func writesConciseDecimalPrices() throws {
+        let raw = """
+        export const MODELS = {
+          "openai": {
+            "example": {
+              id: "example",
+              name: "Example",
+              api: "openai-responses",
+              provider: "openai",
+              cost: { "input": 0.33, "output": 2.75 },
+            },
+          },
+        } as const;
+        """
+
+        let result = try GenerateModelsCore.generate(from: raw)
+        let output = try #require(String(data: result.outputData, encoding: .utf8))
+
+        #expect(output.contains(#""input" : 0.33"#))
+        #expect(!output.contains("0.33000000000000002"))
+    }
 }

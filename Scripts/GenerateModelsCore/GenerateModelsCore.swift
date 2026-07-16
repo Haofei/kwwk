@@ -27,7 +27,8 @@ public enum GenerateModelsCore {
             let snippet = String(json.prefix(500))
             throw GenerateModelsCoreError.conversion("JSON parse failed: \(error)\nsnippet:\n\(snippet)")
         }
-        guard let root = parsed as? [String: Any] else {
+        guard let parsedRoot = parsed as? [String: Any],
+              let root = normalizeJSONNumbers(parsedRoot) as? [String: Any] else {
             throw GenerateModelsCoreError.conversion("top-level catalog is not an object")
         }
 
@@ -37,6 +38,26 @@ public enum GenerateModelsCore {
         )
 
         return ModelGenerationResult(outputData: outputData, root: root)
+    }
+
+    /// JSONSerialization may expand ordinary decimal prices such as `0.33`
+    /// into binary floating-point artifacts such as `0.33000000000000002`
+    /// when re-encoding an `NSNumber`. Preserve the concise decimal spelling
+    /// from pi-mono so regeneration does not create semantic no-op churn.
+    private static func normalizeJSONNumbers(_ value: Any) -> Any {
+        if let object = value as? [String: Any] {
+            return object.mapValues(normalizeJSONNumbers)
+        }
+        if let array = value as? [Any] {
+            return array.map(normalizeJSONNumbers)
+        }
+        if let number = value as? NSNumber {
+            let type = String(cString: number.objCType)
+            if type == "d" || type == "f" {
+                return NSDecimalNumber(string: number.stringValue)
+            }
+        }
+        return value
     }
 
     public static func convert(_ raw: String) throws -> String {
