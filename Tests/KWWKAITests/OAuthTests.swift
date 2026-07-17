@@ -204,6 +204,81 @@ struct GitHubCopilotOAuthTests {
     }
 }
 
+@Suite("OAuth refresh — Kimi For Coding")
+struct KimiCodingOAuthTests {
+    @Test("form POST with grant_type=refresh_token + X-Msh device headers")
+    func kimiRefresh() async throws {
+        let body = #"""
+        {"access_token":"kimi-new","refresh_token":"kimi-refresh-2","expires_in":3600}
+        """#
+        let client = StubResponseClient(body: Data(body.utf8))
+        let updated = try await KimiCodingOAuthProvider(deviceId: "test-device").refresh(
+            OAuthCredentials(access: "old", refresh: "kimi-refresh-1", expires: 0),
+            using: client
+        )
+        #expect(updated.access == "kimi-new")
+        #expect(updated.refresh == "kimi-refresh-2")
+        // Refreshed ~5 minutes before the hour-long expiry.
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        #expect(updated.expires > now + 50 * 60 * 1000)
+        #expect(updated.expires <= now + 60 * 60 * 1000)
+
+        let req = client.lastRequest!
+        #expect(req.method == "POST")
+        #expect(req.url.absoluteString == "https://auth.kimi.com/api/oauth/token")
+        let form = String(data: req.body ?? Data(), encoding: .utf8) ?? ""
+        #expect(form.contains("grant_type=refresh_token"))
+        #expect(form.contains("refresh_token=kimi-refresh-1"))
+        #expect(form.contains("client_id=\(KimiOAuth.clientID)"))
+        #expect(req.headers["X-Msh-Platform"] == "kimi_cli")
+        #expect(req.headers["X-Msh-Device-Id"] == "test-device")
+        #expect(req.headers["User-Agent"]?.hasPrefix("KimiCLI/") == true)
+    }
+
+    @Test("keeps the old refresh token when the server omits a new one")
+    func kimiRefreshKeepsOldToken() async throws {
+        let body = #"{"access_token":"kimi-new","expires_in":3600}"#
+        let client = StubResponseClient(body: Data(body.utf8))
+        let updated = try await KimiCodingOAuthProvider(deviceId: "test-device").refresh(
+            OAuthCredentials(access: "old", refresh: "keep-me", expires: 0),
+            using: client
+        )
+        #expect(updated.refresh == "keep-me")
+    }
+
+    @Test("kimi-coding is a default OAuthManager provider")
+    func kimiInDefaultProviders() {
+        #expect(OAuthManager.defaultProviders().contains { $0.id == "kimi-coding" })
+    }
+
+    @Test("device id stays process-stable when the id file can't be written")
+    func deviceIdFallbackIsStable() {
+        // /dev/null can't grow a subdirectory, so both the read and the
+        // write fail — the process-wide fallback id must be returned, and
+        // must be the same on every call (login and refresh share one
+        // device fingerprint).
+        let unwritable = URL(fileURLWithPath: "/dev/null/kwwk-test/kimi-device-id")
+        let first = KimiOAuth.persistentDeviceId(at: unwritable)
+        let second = KimiOAuth.persistentDeviceId(at: unwritable)
+        #expect(!first.isEmpty)
+        #expect(first == second)
+    }
+
+    @Test("device id round-trips through its file")
+    func deviceIdPersists() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kwwk-kimi-device-\(UUID().uuidString.prefix(8))")
+        let url = dir.appendingPathComponent("kimi-device-id")
+        let first = KimiOAuth.persistentDeviceId(at: url)
+        let second = KimiOAuth.persistentDeviceId(at: url)
+        #expect(first == second)
+        let onDisk = try String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(onDisk == first)
+        try? FileManager.default.removeItem(at: dir)
+    }
+}
+
 @Suite("OAuthManager integration")
 struct OAuthManagerTests {
     /// Provider that counts refresh calls so we can verify caching.
