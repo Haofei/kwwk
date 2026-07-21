@@ -591,7 +591,7 @@ struct SubagentYieldAndHistoryTests {
             "tail": .null,
         ])
         _ = try validateToolArguments(
-            tool: tool.toKWAITool(),
+            tool: tool.toKWWKAITool(),
             toolCall: ToolCall(
                 id: "null-history-pagination",
                 name: "agent_history",

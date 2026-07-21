@@ -512,12 +512,6 @@ public actor BackgroundTaskManager {
         )
     }
 
-    /// Return the tail of the task's output file (at most `tailBytes` bytes).
-    public func readOutputTail(_ taskId: String) -> String {
-        guard let entry = tasks[taskId] else { return "" }
-        return readTail(entry.outputFile, maxBytes: tailBytes)
-    }
-
     /// Drain completion/stall notifications queued since the last drain.
     public func drainNotifications(sessionId: String? = nil) -> [BackgroundTaskNotification] {
         var matched: [BackgroundTaskNotification] = []

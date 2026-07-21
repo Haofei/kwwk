@@ -1,9 +1,10 @@
 import Foundation
 
-/// Build/version surface for the CLI. Bumped by release tooling; rendered
-/// on the welcome card and `--help`.
+/// Build/version surface for the CLI, rendered on the TUI welcome card.
+/// Maintained by hand — no release tooling touches this file — so bump it
+/// alongside each tag. (`--help` does not print a version.)
 enum KWWKBuild {
-    static let version = "0.1.0"
+    static let version = "0.1.30"
 }
 
 /// Truecolor palette + text styling for the redesigned TUI chrome. The
@@ -113,15 +114,6 @@ enum Box {
         let vis = ANSI.visibleWidth(s)
         if vis >= width { return ANSI.truncate(s, to: width) }
         return s + String(repeating: " ", count: width - vis)
-    }
-
-    /// Center a styled string inside `width` visible columns.
-    static func center(_ s: String, to width: Int) -> String {
-        let vis = ANSI.visibleWidth(s)
-        guard vis < width else { return ANSI.truncate(s, to: width) }
-        let left = (width - vis) / 2
-        let right = width - vis - left
-        return String(repeating: " ", count: left) + s + String(repeating: " ", count: right)
     }
 
     /// Top border with an optional inset label: `╭─ label ──────────╮`.

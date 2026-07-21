@@ -69,9 +69,9 @@ public struct BackgroundTaskOutcome: Sendable {
     }
 }
 
-/// Pluggable executor. KWAgent ships no concrete runners — KWCoding (or user
-/// code) supplies one per task kind (`BashBackgroundRunner`, …). The Manager
-/// owns lifecycle; the Runner owns the work.
+/// Pluggable executor. KWWKAgent ships `BashBackgroundRunner`; user code can
+/// supply additional runners per task kind. The Manager owns lifecycle; the
+/// Runner owns the work.
 ///
 /// Contract:
 ///   - `run` must return promptly (do the work in a detached Task).

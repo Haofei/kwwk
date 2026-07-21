@@ -114,10 +114,6 @@ public struct Model: Codable, Sendable, Hashable {
     }
 }
 
-public func modelsAreEqual(_ a: Model, _ b: Model) -> Bool {
-    a.id == b.id && a.provider == b.provider && a.api == b.api
-}
-
 /// Compute USD cost from usage and model pricing (per 1M tokens).
 public func calculateCost(model: Model, usage: Usage) -> Cost {
     let inputTokens = usage.input + usage.cacheRead + usage.cacheWrite

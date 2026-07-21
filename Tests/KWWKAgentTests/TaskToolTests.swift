@@ -611,7 +611,7 @@ struct TaskToolTests {
         ] {
             let tool = try #require(byName[name])
             _ = try validateToolArguments(
-                tool: tool.toKWAITool(),
+                tool: tool.toKWWKAITool(),
                 toolCall: ToolCall(id: "defaults-\(name)", name: name, arguments: args)
             )
             let result = try await tool.execute("defaults-\(name)", args, nil, nil)
@@ -632,7 +632,7 @@ struct TaskToolTests {
         ] {
             let tool = try #require(byName[name])
             _ = try validateToolArguments(
-                tool: tool.toKWAITool(),
+                tool: tool.toKWWKAITool(),
                 toolCall: ToolCall(id: "nulls-\(name)", name: name, arguments: args)
             )
             let result = try await tool.execute("nulls-\(name)", args, nil, nil)
@@ -641,7 +641,7 @@ struct TaskToolTests {
 
         let readTool = try #require(byName["task_read"])
         _ = try validateToolArguments(
-            tool: readTool.toKWAITool(),
+            tool: readTool.toKWWKAITool(),
             toolCall: ToolCall(
                 id: "null-read-defaults",
                 name: "task_read",

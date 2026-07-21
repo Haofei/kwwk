@@ -93,12 +93,6 @@ final class AskModal: Modal {
         onComplete(outcome)
     }
 
-    /// External teardown (run aborted while the modal was up): report
-    /// `cancelled` without touching the host — the caller closes it.
-    func cancelExternally() {
-        finish(.cancelled)
-    }
-
     // MARK: - Modal
 
     func up() {

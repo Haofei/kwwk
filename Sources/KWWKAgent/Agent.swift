@@ -40,7 +40,6 @@ public enum AgentError: Error, Equatable {
     case noMessagesToContinue
     case cannotContinueFromRole(String)
     case alreadyRunning
-    case listenerOutsideActiveRun
     case maxRetriesExceeded
     case aborted
 }

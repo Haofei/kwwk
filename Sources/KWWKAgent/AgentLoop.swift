@@ -744,11 +744,11 @@ public enum AgentLoop {
         if terminalToolOnly, let terminalToolName = config.terminalToolName {
             availableTools = context.tools
                 .filter { $0.name == terminalToolName }
-                .map { $0.toKWAITool() }
+                .map { $0.toKWWKAITool() }
         } else if finalTextOnly {
             availableTools = []
         } else {
-            availableTools = context.tools.map { $0.toKWAITool() }
+            availableTools = context.tools.map { $0.toKWWKAITool() }
         }
         let llmContext = Context(
             systemPrompt: systemPrompt,
@@ -1642,10 +1642,10 @@ public enum AgentLoop {
         guard let tool = context.tools.first(where: { $0.name == toolCall.name }) else {
             return .immediate(errorToolResult("Tool \(toolCall.name) not found"), true)
         }
-        let kwaiTool = tool.toKWAITool()
+        let kwwkaiTool = tool.toKWWKAITool()
         let args: JSONValue
         do {
-            args = try validateToolArguments(tool: kwaiTool, toolCall: toolCall)
+            args = try validateToolArguments(tool: kwwkaiTool, toolCall: toolCall)
         } catch {
             return .immediate(errorToolResult(schemaValidationMessage(error)), true)
         }
@@ -1676,7 +1676,7 @@ public enum AgentLoop {
                     rewrittenCall.arguments = rewritten
                     do {
                         effectiveArgs = try validateToolArguments(
-                            tool: kwaiTool,
+                            tool: kwwkaiTool,
                             toolCall: rewrittenCall
                         )
                     } catch {
@@ -2166,8 +2166,8 @@ private final class EmitBox: @unchecked Sendable {
 }
 
 extension AgentTool {
-    /// Convert to the Tool struct that KWAI's streaming providers consume.
-    func toKWAITool() -> Tool {
+    /// Convert to the Tool struct that KWWKAI's streaming providers consume.
+    func toKWWKAITool() -> Tool {
         Tool(name: name, description: description, parameters: parameters)
     }
 }

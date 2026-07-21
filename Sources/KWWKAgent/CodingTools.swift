@@ -2,7 +2,6 @@ import Foundation
 import KWWKAI
 
 public enum CodingToolError: Error, Equatable, LocalizedError {
-    case notImplemented
     case fileNotFound(String)
     case invalidArgument(String)
     case runtime(String)
@@ -14,8 +13,6 @@ public enum CodingToolError: Error, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notImplemented:
-            return "not implemented"
         case .fileNotFound(let path):
             return "file not found: \(path)"
         case .invalidArgument(let message):
@@ -154,42 +151,5 @@ public struct LSEntry: Sendable, Equatable {
         self.name = name
         self.kind = kind
         self.size = size
-    }
-}
-
-// MARK: - Tool detail payloads (mirroring pi-coding-agent details shapes)
-
-public struct ReadToolDetails: Sendable, Codable, Equatable {
-    public struct Truncation: Sendable, Codable, Equatable {
-        public var truncated: Bool
-        public var truncatedBy: String           // "lines" | "bytes"
-        public var totalLines: Int
-        public var outputLines: Int
-        public var maxLines: Int?
-        public var maxBytes: Int?
-        public var firstLineExceedsLimit: Bool
-
-        public init(truncated: Bool, truncatedBy: String, totalLines: Int, outputLines: Int, maxLines: Int? = nil, maxBytes: Int? = nil, firstLineExceedsLimit: Bool = false) {
-            self.truncated = truncated
-            self.truncatedBy = truncatedBy
-            self.totalLines = totalLines
-            self.outputLines = outputLines
-            self.maxLines = maxLines
-            self.maxBytes = maxBytes
-            self.firstLineExceedsLimit = firstLineExceedsLimit
-        }
-    }
-    public var truncation: Truncation?
-    public init(truncation: Truncation? = nil) { self.truncation = truncation }
-}
-
-public struct EditToolDetails: Sendable, Codable, Equatable {
-    public var diff: String
-    public var patch: String?
-    public var firstChangedLine: Int?
-    public init(diff: String, patch: String? = nil, firstChangedLine: Int? = nil) {
-        self.diff = diff
-        self.patch = patch
-        self.firstChangedLine = firstChangedLine
     }
 }

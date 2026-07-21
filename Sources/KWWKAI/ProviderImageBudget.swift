@@ -11,9 +11,7 @@ enum ProviderImageBudget {
         "chatgpt-codex": 200,
         "google": 200,
         "google-vertex": 200,
-        "google-gemini-cli": 200,
         "openrouter": 90,
-        "umans": 10,
     ]
 
     private static let imageOmissionText = "[image omitted: provider image limit]"
