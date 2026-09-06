@@ -1947,126 +1947,6 @@
       "input" : 0,
       "output" : 0
     },
-    "id" : "cursor-grok-4.5-high",
-    "input" : [
-      "text",
-      "image"
-    ],
-    "maxTokens" : 64000,
-    "name" : "Cursor Grok 4.5",
-    "provider" : "cursor",
-    "reasoning" : false
-  },
-  {
-    "api" : "cursor-agent",
-    "baseUrl" : "https:\/\/api2.cursor.sh",
-    "contextWindow" : 200000,
-    "cost" : {
-      "cacheRead" : 0,
-      "cacheWrite" : 0,
-      "input" : 0,
-      "output" : 0
-    },
-    "id" : "cursor-grok-4.5-high-fast",
-    "input" : [
-      "text",
-      "image"
-    ],
-    "maxTokens" : 64000,
-    "name" : "Cursor Grok 4.5 Fast",
-    "provider" : "cursor",
-    "reasoning" : false
-  },
-  {
-    "api" : "cursor-agent",
-    "baseUrl" : "https:\/\/api2.cursor.sh",
-    "contextWindow" : 200000,
-    "cost" : {
-      "cacheRead" : 0,
-      "cacheWrite" : 0,
-      "input" : 0,
-      "output" : 0
-    },
-    "id" : "cursor-grok-4.5-low",
-    "input" : [
-      "text",
-      "image"
-    ],
-    "maxTokens" : 64000,
-    "name" : "Cursor Grok 4.5 Low",
-    "provider" : "cursor",
-    "reasoning" : false
-  },
-  {
-    "api" : "cursor-agent",
-    "baseUrl" : "https:\/\/api2.cursor.sh",
-    "contextWindow" : 200000,
-    "cost" : {
-      "cacheRead" : 0,
-      "cacheWrite" : 0,
-      "input" : 0,
-      "output" : 0
-    },
-    "id" : "cursor-grok-4.5-low-fast",
-    "input" : [
-      "text",
-      "image"
-    ],
-    "maxTokens" : 64000,
-    "name" : "Cursor Grok 4.5 Low Fast",
-    "provider" : "cursor",
-    "reasoning" : false
-  },
-  {
-    "api" : "cursor-agent",
-    "baseUrl" : "https:\/\/api2.cursor.sh",
-    "contextWindow" : 200000,
-    "cost" : {
-      "cacheRead" : 0,
-      "cacheWrite" : 0,
-      "input" : 0,
-      "output" : 0
-    },
-    "id" : "cursor-grok-4.5-medium",
-    "input" : [
-      "text",
-      "image"
-    ],
-    "maxTokens" : 64000,
-    "name" : "Cursor Grok 4.5 Medium",
-    "provider" : "cursor",
-    "reasoning" : false
-  },
-  {
-    "api" : "cursor-agent",
-    "baseUrl" : "https:\/\/api2.cursor.sh",
-    "contextWindow" : 200000,
-    "cost" : {
-      "cacheRead" : 0,
-      "cacheWrite" : 0,
-      "input" : 0,
-      "output" : 0
-    },
-    "id" : "cursor-grok-4.5-medium-fast",
-    "input" : [
-      "text",
-      "image"
-    ],
-    "maxTokens" : 64000,
-    "name" : "Cursor Grok 4.5 Medium Fast",
-    "provider" : "cursor",
-    "reasoning" : false
-  },
-  {
-    "api" : "cursor-agent",
-    "baseUrl" : "https:\/\/api2.cursor.sh",
-    "contextWindow" : 200000,
-    "cost" : {
-      "cacheRead" : 0,
-      "cacheWrite" : 0,
-      "input" : 0,
-      "output" : 0
-    },
     "id" : "cursor-grok-4.6-high",
     "input" : [
       "text"
@@ -3468,7 +3348,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Luna High Fast",
+    "name" : "GPT-5.6 Luna 1M High Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3508,7 +3388,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Luna Low Fast",
+    "name" : "GPT-5.6 Luna 1M Low Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3548,7 +3428,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Luna Max Fast",
+    "name" : "GPT-5.6 Luna 1M Max Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3588,7 +3468,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Luna Fast",
+    "name" : "GPT-5.6 Luna 1M Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3628,7 +3508,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Luna None Fast",
+    "name" : "GPT-5.6 Luna 1M None Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3668,7 +3548,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Luna Extra High Fast",
+    "name" : "GPT-5.6 Luna 1M Extra High Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3708,7 +3588,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Sol High Fast",
+    "name" : "GPT-5.6 Sol 1M High Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3748,7 +3628,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Sol Low Fast",
+    "name" : "GPT-5.6 Sol 1M Low Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3788,7 +3668,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Sol Max Fast",
+    "name" : "GPT-5.6 Sol 1M Max Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3828,7 +3708,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Sol Fast",
+    "name" : "GPT-5.6 Sol 1M Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3868,7 +3748,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Sol None Fast",
+    "name" : "GPT-5.6 Sol 1M None Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3908,7 +3788,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Sol Extra High Fast",
+    "name" : "GPT-5.6 Sol 1M Extra High Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3948,7 +3828,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Terra High Fast",
+    "name" : "GPT-5.6 Terra 1M High Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -3988,7 +3868,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Terra Low Fast",
+    "name" : "GPT-5.6 Terra 1M Low Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -4028,7 +3908,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Terra Max Fast",
+    "name" : "GPT-5.6 Terra 1M Max Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -4068,7 +3948,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Terra Fast",
+    "name" : "GPT-5.6 Terra 1M Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -4108,7 +3988,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Terra None Fast",
+    "name" : "GPT-5.6 Terra 1M None Fast",
     "provider" : "cursor",
     "reasoning" : false
   },
@@ -4148,7 +4028,7 @@
       "image"
     ],
     "maxTokens" : 64000,
-    "name" : "GPT-5.6 Terra Extra High Fast",
+    "name" : "GPT-5.6 Terra 1M Extra High Fast",
     "provider" : "cursor",
     "reasoning" : false
   },

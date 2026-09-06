@@ -2931,6 +2931,7 @@
       "baseUrl" : "https:\/\/api.anthropic.com",
       "compat" : {
         "forceAdaptiveThinking" : true,
+        "supportsMidConvoEffort" : true,
         "supportsStrictTools" : true
       },
       "contextWindow" : 1000000,
@@ -3136,19 +3137,8 @@
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.anthropic.com",
       "compat" : {
-        "allowedFallbackModels" : [
-          {
-            "cost" : {
-              "cacheRead" : 0.5,
-              "cacheWrite" : 6.25,
-              "input" : 5,
-              "output" : 25
-            },
-            "model" : "claude-opus-4-8",
-            "provider" : "anthropic"
-          }
-        ],
         "forceAdaptiveThinking" : true,
+        "supportsMidConvoEffort" : true,
         "supportsStrictTools" : true,
         "supportsTemperature" : false
       },
@@ -3170,6 +3160,7 @@
       "reasoning" : true,
       "thinkingLevelMap" : {
         "max" : "max",
+        "off" : null,
         "xhigh" : "xhigh"
       }
     },
@@ -4041,6 +4032,38 @@
         "xhigh" : "xhigh"
       }
     },
+    "gpt-6-astra" : {
+      "api" : "azure-openai-responses",
+      "baseUrl" : "",
+      "compat" : {
+        "supportsOpenAIGrammarTools" : true
+      },
+      "contextWindow" : 272000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "id" : "gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra",
+      "provider" : "azure-openai-responses",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
     "gpt-realtime-2.1" : {
       "api" : "azure-openai-responses",
       "baseUrl" : "",
@@ -4825,8 +4848,7 @@
       },
       "id" : "zai-org\/GLM-5.2",
       "input" : [
-        "text",
-        "image"
+        "text"
       ],
       "maxTokens" : 262144,
       "name" : "GLM 5.2",
@@ -4869,8 +4891,7 @@
       },
       "id" : "zai-org\/GLM-5.2-Fast",
       "input" : [
-        "text",
-        "image"
+        "text"
       ],
       "maxTokens" : 262144,
       "name" : "GLM 5.2 Fast",
@@ -4921,6 +4942,45 @@
         "medium" : null,
         "minimal" : null,
         "off" : null,
+        "xhigh" : null
+      }
+    },
+    "zai-org\/GLM-5.3-Fast" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/inference.baseten.co\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsLongCacheRetention" : false,
+        "supportsReasoningEffort" : true,
+        "supportsStore" : false,
+        "supportsStrictMode" : true,
+        "supportsUsageInStreaming" : true,
+        "thinkingFormat" : "openai"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 2.1,
+        "output" : 6.6
+      },
+      "id" : "zai-org\/GLM-5.3-Fast",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 262144,
+      "name" : "GLM 5.3 Fast",
+      "provider" : "baseten",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : "none",
         "xhigh" : null
       }
     },
@@ -5053,6 +5113,35 @@
       ],
       "maxTokens" : 128000,
       "name" : "Claude Fable 5",
+      "provider" : "cloudflare-ai-gateway",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "max" : "max",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "claude-fable-5.1" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/gateway.ai.cloudflare.com\/v1\/{CLOUDFLARE_ACCOUNT_ID}\/{CLOUDFLARE_GATEWAY_ID}\/anthropic",
+      "compat" : {
+        "forceAdaptiveThinking" : true,
+        "sendSessionAffinityHeaders" : true
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.25,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "id" : "claude-fable-5.1",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "Claude Fable 5.1",
       "provider" : "cloudflare-ai-gateway",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -7170,6 +7259,32 @@
       "provider" : "fireworks",
       "reasoning" : true
     },
+    "accounts\/fireworks\/models\/deepseek-v4-flash-vision-exp" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/api.fireworks.ai\/inference",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsCacheControlOnTools" : false,
+        "supportsEagerToolInputStreaming" : false,
+        "supportsLongCacheRetention" : false
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.0070000000000000001,
+        "cacheWrite" : 0,
+        "input" : 0.22,
+        "output" : 0.66
+      },
+      "id" : "accounts\/fireworks\/models\/deepseek-v4-flash-vision-exp",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 384000,
+      "name" : "DeepSeek V4 Flash Vision Exp",
+      "provider" : "fireworks",
+      "reasoning" : true
+    },
     "accounts\/fireworks\/models\/deepseek-v4-pro-0813" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.fireworks.ai\/inference",
@@ -7255,7 +7370,7 @@
       "reasoning" : true,
       "thinkingLevelMap" : {
         "high" : "high",
-        "low" : null,
+        "low" : "low",
         "max" : "max",
         "medium" : null,
         "minimal" : null,
@@ -7274,7 +7389,7 @@
       },
       "contextWindow" : 1000000,
       "cost" : {
-        "cacheRead" : 0.029000000000000001,
+        "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
         "input" : 0.15,
         "output" : 0.5
@@ -7290,7 +7405,7 @@
       "reasoning" : true,
       "thinkingLevelMap" : {
         "high" : "high",
-        "low" : null,
+        "low" : "low",
         "max" : "max",
         "medium" : null,
         "minimal" : null,
@@ -7567,6 +7682,31 @@
       "provider" : "fireworks",
       "reasoning" : true
     },
+    "accounts\/fireworks\/models\/qwen3p8-2p4t-a95b" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/api.fireworks.ai\/inference",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsCacheControlOnTools" : false,
+        "supportsEagerToolInputStreaming" : false,
+        "supportsLongCacheRetention" : false
+      },
+      "contextWindow" : 262144,
+      "cost" : {
+        "cacheRead" : 0.25,
+        "cacheWrite" : 0,
+        "input" : 2,
+        "output" : 6
+      },
+      "id" : "accounts\/fireworks\/models\/qwen3p8-2p4t-a95b",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 131072,
+      "name" : "Qwen3.8 2.4T A95B",
+      "provider" : "fireworks",
+      "reasoning" : true
+    },
     "accounts\/fireworks\/models\/qwen3p8-max" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.fireworks.ai\/inference",
@@ -7700,6 +7840,40 @@
         "xhigh" : "xhigh"
       }
     },
+    "claude-fable-5.1" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
+      "compat" : {
+        "forceAdaptiveThinking" : true
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.25,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "headers" : {
+        "Copilot-Integration-Id" : "vscode-chat",
+        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
+        "Editor-Version" : "vscode\/1.107.0",
+        "User-Agent" : "GitHubCopilotChat\/0.35.0"
+      },
+      "id" : "claude-fable-5.1",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "Claude Fable 5.1",
+      "provider" : "github-copilot",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "max" : "max",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
     "claude-haiku-4.5" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
@@ -7728,64 +7902,6 @@
       "name" : "Claude Haiku 4.5 (latest)",
       "provider" : "github-copilot",
       "reasoning" : true
-    },
-    "claude-opus-4.5" : {
-      "api" : "anthropic-messages",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "contextWindow" : 200000,
-      "cost" : {
-        "cacheRead" : 0.5,
-        "cacheWrite" : 6.25,
-        "input" : 5,
-        "output" : 25
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "claude-opus-4.5",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 32000,
-      "name" : "Claude Opus 4.5 (latest)",
-      "provider" : "github-copilot",
-      "reasoning" : true
-    },
-    "claude-opus-4.6" : {
-      "api" : "anthropic-messages",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "compat" : {
-        "forceAdaptiveThinking" : true
-      },
-      "contextWindow" : 1000000,
-      "cost" : {
-        "cacheRead" : 0.5,
-        "cacheWrite" : 6.25,
-        "input" : 5,
-        "output" : 25
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "claude-opus-4.6",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 32000,
-      "name" : "Claude Opus 4.6",
-      "provider" : "github-copilot",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "max" : "max"
-      }
     },
     "claude-opus-4.7" : {
       "api" : "anthropic-messages",
@@ -7892,64 +8008,6 @@
         "xhigh" : "xhigh"
       }
     },
-    "claude-sonnet-4" : {
-      "api" : "anthropic-messages",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "compat" : {
-        "supportsEagerToolInputStreaming" : false
-      },
-      "contextWindow" : 216000,
-      "cost" : {
-        "cacheRead" : 0.3,
-        "cacheWrite" : 3.75,
-        "input" : 3,
-        "output" : 15
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "claude-sonnet-4",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 16000,
-      "name" : "Claude Sonnet 4 (latest)",
-      "provider" : "github-copilot",
-      "reasoning" : true
-    },
-    "claude-sonnet-4.5" : {
-      "api" : "anthropic-messages",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "compat" : {
-        "supportsEagerToolInputStreaming" : false
-      },
-      "contextWindow" : 200000,
-      "cost" : {
-        "cacheRead" : 0.3,
-        "cacheWrite" : 3.75,
-        "input" : 3,
-        "output" : 15
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "claude-sonnet-4.5",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 32000,
-      "name" : "Claude Sonnet 4.5 (latest)",
-      "provider" : "github-copilot",
-      "reasoning" : true
-    },
     "claude-sonnet-4.6" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
@@ -8015,46 +8073,6 @@
         "max" : "max",
         "xhigh" : "xhigh"
       }
-    },
-    "gemini-3.1-pro-preview" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "compat" : {
-        "supportsDeveloperRole" : false,
-        "supportsReasoningEffort" : false,
-        "supportsStore" : false
-      },
-      "contextWindow" : 1000000,
-      "cost" : {
-        "cacheRead" : 0.2,
-        "cacheWrite" : 0,
-        "input" : 2,
-        "output" : 12,
-        "tiers" : [
-          {
-            "cacheRead" : 0.4,
-            "cacheWrite" : 0,
-            "input" : 4,
-            "inputTokensAbove" : 200000,
-            "output" : 18
-          }
-        ]
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "gemini-3.1-pro-preview",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 64000,
-      "name" : "Gemini 3.1 Pro Preview",
-      "provider" : "github-copilot",
-      "reasoning" : true
     },
     "gemini-3.5-flash" : {
       "api" : "openai-completions",
@@ -8149,7 +8167,7 @@
       "provider" : "github-copilot",
       "reasoning" : true
     },
-    "gpt-4.1" : {
+    "gemini-3.8-flash" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
       "compat" : {
@@ -8157,12 +8175,12 @@
         "supportsReasoningEffort" : false,
         "supportsStore" : false
       },
-      "contextWindow" : 128000,
+      "contextWindow" : 1000000,
       "cost" : {
-        "cacheRead" : 0.5,
+        "cacheRead" : 0.074999999999999997,
         "cacheWrite" : 0,
-        "input" : 2,
-        "output" : 8
+        "input" : 0.75,
+        "output" : 3.75
       },
       "headers" : {
         "Copilot-Integration-Id" : "vscode-chat",
@@ -8170,15 +8188,15 @@
         "Editor-Version" : "vscode\/1.107.0",
         "User-Agent" : "GitHubCopilotChat\/0.35.0"
       },
-      "id" : "gpt-4.1",
+      "id" : "gemini-3.8-flash",
       "input" : [
         "text",
         "image"
       ],
-      "maxTokens" : 16384,
-      "name" : "GPT-4.1",
+      "maxTokens" : 64000,
+      "name" : "Gemini 3.8 Flash",
       "provider" : "github-copilot",
-      "reasoning" : false
+      "reasoning" : true
     },
     "gpt-5-mini" : {
       "api" : "openai-responses",
@@ -8216,74 +8234,6 @@
         "minimal" : "low",
         "off" : null,
         "xhigh" : null
-      }
-    },
-    "gpt-5.2" : {
-      "api" : "openai-responses",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "compat" : {
-        "supportsOpenAIGrammarTools" : true
-      },
-      "contextWindow" : 400000,
-      "cost" : {
-        "cacheRead" : 0.175,
-        "cacheWrite" : 0,
-        "input" : 1.75,
-        "output" : 14
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "gpt-5.2",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 128000,
-      "name" : "GPT-5.2",
-      "provider" : "github-copilot",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "minimal" : "low",
-        "off" : null,
-        "xhigh" : "xhigh"
-      }
-    },
-    "gpt-5.2-codex" : {
-      "api" : "openai-responses",
-      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
-      "compat" : {
-        "supportsOpenAIGrammarTools" : true
-      },
-      "contextWindow" : 400000,
-      "cost" : {
-        "cacheRead" : 0.175,
-        "cacheWrite" : 0,
-        "input" : 1.75,
-        "output" : 14
-      },
-      "headers" : {
-        "Copilot-Integration-Id" : "vscode-chat",
-        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
-        "Editor-Version" : "vscode\/1.107.0",
-        "User-Agent" : "GitHubCopilotChat\/0.35.0"
-      },
-      "id" : "gpt-5.2-codex",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 128000,
-      "name" : "GPT-5.2 Codex",
-      "provider" : "github-copilot",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "minimal" : "low",
-        "off" : null,
-        "xhigh" : "xhigh"
       }
     },
     "gpt-5.3-codex" : {
@@ -8545,17 +8495,17 @@
       },
       "contextWindow" : 1050000,
       "cost" : {
-        "cacheRead" : 0.2,
-        "cacheWrite" : 2.5,
-        "input" : 2,
-        "output" : 10,
+        "cacheRead" : 0.4,
+        "cacheWrite" : 5,
+        "input" : 4,
+        "output" : 20,
         "tiers" : [
           {
-            "cacheRead" : 0.4,
-            "cacheWrite" : 5,
-            "input" : 4,
+            "cacheRead" : 0.8,
+            "cacheWrite" : 10,
+            "input" : 8,
             "inputTokensAbove" : 272000,
-            "output" : 15
+            "output" : 30
           }
         ]
       },
@@ -8628,6 +8578,50 @@
         "medium" : "medium",
         "minimal" : "low",
         "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "gpt-6-astra" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "supportsReasoningEffort" : false,
+        "supportsStore" : false
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50,
+        "tiers" : [
+          {
+            "cacheRead" : 2,
+            "cacheWrite" : 25,
+            "input" : 20,
+            "inputTokensAbove" : 272000,
+            "output" : 75
+          }
+        ]
+      },
+      "headers" : {
+        "Copilot-Integration-Id" : "vscode-chat",
+        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
+        "Editor-Version" : "vscode\/1.107.0",
+        "User-Agent" : "GitHubCopilotChat\/0.35.0"
+      },
+      "id" : "gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra",
+      "provider" : "github-copilot",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "max" : "max",
         "xhigh" : "xhigh"
       }
     },
@@ -9233,6 +9227,29 @@
         "off" : null
       }
     },
+    "gemini-3.8-flash" : {
+      "api" : "google-generative-ai",
+      "baseUrl" : "https:\/\/generativelanguage.googleapis.com\/v1beta",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.074999999999999997,
+        "cacheWrite" : 0,
+        "input" : 0.75,
+        "output" : 3.75
+      },
+      "id" : "gemini-3.8-flash",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 65536,
+      "name" : "Gemini 3.8 Flash",
+      "provider" : "google",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "off" : null
+      }
+    },
     "gemini-flash-latest" : {
       "api" : "google-generative-ai",
       "baseUrl" : "https:\/\/generativelanguage.googleapis.com\/v1beta",
@@ -9581,6 +9598,29 @@
       ],
       "maxTokens" : 65536,
       "name" : "Gemini 3.7 Flash",
+      "provider" : "google-vertex",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "off" : null
+      }
+    },
+    "gemini-3.8-flash" : {
+      "api" : "google-vertex",
+      "baseUrl" : "https:\/\/{location}-aiplatform.googleapis.com",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.074999999999999997,
+        "cacheWrite" : 0,
+        "input" : 0.75,
+        "output" : 3.75
+      },
+      "id" : "gemini-3.8-flash",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 65536,
+      "name" : "Gemini 3.8 Flash",
       "provider" : "google-vertex",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -9995,6 +10035,38 @@
       "thinkingLevelMap" : {
         "high" : "high",
         "low" : null,
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
+    },
+    "deepseek-ai\/DeepSeek-V4-Flash-Vision-Exp" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/router.huggingface.co\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0.44,
+        "output" : 1.32
+      },
+      "id" : "deepseek-ai\/DeepSeek-V4-Flash-Vision-Exp",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 384000,
+      "name" : "DeepSeek V4 Flash Vision Exp",
+      "provider" : "huggingface",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
         "max" : "max",
         "medium" : null,
         "minimal" : null,
@@ -11095,7 +11167,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 64000,
+      "maxTokens" : 128000,
       "name" : "Hy3",
       "provider" : "huggingface",
       "reasoning" : true,
@@ -13578,36 +13650,6 @@
       "provider" : "nvidia",
       "reasoning" : true
     },
-    "openai\/gpt-oss-120b" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/integrate.api.nvidia.com\/v1",
-      "compat" : {
-        "maxTokensField" : "max_tokens",
-        "supportsDeveloperRole" : false,
-        "supportsLongCacheRetention" : false,
-        "supportsReasoningEffort" : false,
-        "supportsStore" : false,
-        "supportsStrictMode" : false
-      },
-      "contextWindow" : 128000,
-      "cost" : {
-        "cacheRead" : 0,
-        "cacheWrite" : 0,
-        "input" : 0,
-        "output" : 0
-      },
-      "headers" : {
-        "NVCF-POLL-SECONDS" : "3600"
-      },
-      "id" : "openai\/gpt-oss-120b",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 8192,
-      "name" : "GPT-OSS-120B",
-      "provider" : "nvidia",
-      "reasoning" : true
-    },
     "poolside\/laguna-xs-2.1" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/integrate.api.nvidia.com\/v1",
@@ -14631,6 +14673,51 @@
         "xhigh" : "xhigh"
       }
     },
+    "gpt-6-astra" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/api.openai.com\/v1",
+      "compat" : {
+        "supportsAdditionalTools" : true,
+        "supportsExplicitPromptCacheMode" : true,
+        "supportsOpenAIGrammarTools" : true,
+        "supportsStrictMode" : true,
+        "supportsToolSearch" : true
+      },
+      "contextWindow" : 272000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50,
+        "tiers" : [
+          {
+            "cacheRead" : 2,
+            "cacheWrite" : 25,
+            "input" : 20,
+            "inputTokensAbove" : 272000,
+            "output" : 75
+          }
+        ]
+      },
+      "id" : "gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra",
+      "provider" : "openai",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
     "gpt-realtime-2.1" : {
       "api" : "openai-responses",
       "baseUrl" : "https:\/\/api.openai.com\/v1",
@@ -15100,6 +15187,49 @@
         "minimal" : "low",
         "xhigh" : "xhigh"
       }
+    },
+    "gpt-6-astra" : {
+      "api" : "openai-codex-responses",
+      "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
+      "compat" : {
+        "supportsAdditionalTools" : true,
+        "supportsOpenAIGrammarTools" : true,
+        "supportsToolSearch" : true
+      },
+      "contextWindow" : 272000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50,
+        "tiers" : [
+          {
+            "cacheRead" : 2,
+            "cacheWrite" : 25,
+            "input" : 20,
+            "inputTokensAbove" : 272000,
+            "output" : 75
+          }
+        ]
+      },
+      "id" : "gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra",
+      "provider" : "openai-codex",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : "low",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
     }
   },
   "opencode" : {
@@ -15461,6 +15591,41 @@
         "xhigh" : null
       }
     },
+    "deepseek-v4-flash-vision-exp" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "requiresReasoningContentOnAssistantMessages" : true,
+        "supportsDeveloperRole" : false,
+        "supportsStore" : false
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.028000000000000001,
+        "cacheWrite" : 0,
+        "input" : 0.14,
+        "output" : 0.28
+      },
+      "id" : "deepseek-v4-flash-vision-exp",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 384000,
+      "name" : "DeepSeek V4 Flash Vision Exp",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
+    },
     "deepseek-v4-pro" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
@@ -15638,6 +15803,29 @@
         "off" : null
       }
     },
+    "gemini-3.8-flash" : {
+      "api" : "google-generative-ai",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.15,
+        "cacheWrite" : 0,
+        "input" : 1.5,
+        "output" : 7.5
+      },
+      "id" : "gemini-3.8-flash",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 65536,
+      "name" : "Gemini 3.8 Flash",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "off" : null
+      }
+    },
     "glm-5" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
@@ -15712,6 +15900,73 @@
       "thinkingLevelMap" : {
         "high" : "high",
         "low" : null,
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
+    },
+    "glm-5.3" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsStore" : false
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.26,
+        "cacheWrite" : 0,
+        "input" : 1.4,
+        "output" : 4.4
+      },
+      "id" : "glm-5.3",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 131072,
+      "name" : "GLM-5.3",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
+    },
+    "glm-5.3-flash" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsStore" : false
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.029999999999999999,
+        "cacheWrite" : 0,
+        "input" : 0.15,
+        "output" : 0.5
+      },
+      "id" : "glm-5.3-flash",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 131072,
+      "name" : "GLM-5.3-Flash",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
         "max" : "max",
         "medium" : null,
         "minimal" : null,
@@ -16346,6 +16601,39 @@
         "xhigh" : "xhigh"
       }
     },
+    "gpt-6-astra" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "compat" : {
+        "sessionAffinityFormat" : "openai-nosession",
+        "supportsOpenAIGrammarTools" : true
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "id" : "gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
     "grok-4.5" : {
       "api" : "openai-responses",
       "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
@@ -16728,6 +17016,70 @@
       ],
       "maxTokens" : 131072,
       "name" : "Muse Spark 1.2 Free",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : null,
+        "medium" : "medium",
+        "minimal" : "minimal",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "muse-spark-1.3" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "compat" : {
+        "sessionAffinityFormat" : "openai-nosession"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.15,
+        "cacheWrite" : 0,
+        "input" : 1.25,
+        "output" : 4.25
+      },
+      "id" : "muse-spark-1.3",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 131072,
+      "name" : "Muse Spark 1.3",
+      "provider" : "opencode",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : "minimal",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "muse-spark-1.3-contributor-free" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/v1",
+      "compat" : {
+        "sessionAffinityFormat" : "openai-nosession"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0,
+        "output" : 0
+      },
+      "id" : "muse-spark-1.3-contributor-free",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 131072,
+      "name" : "Muse Spark 1.3 Free",
       "provider" : "opencode",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -17137,7 +17489,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 64000,
+      "maxTokens" : 128000,
       "name" : "Hy3",
       "provider" : "opencode-go",
       "reasoning" : true,
@@ -17425,6 +17777,72 @@
         "xhigh" : "xhigh"
       }
     },
+    "muse-spark-1.3-contributor" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/go\/v1",
+      "compat" : {
+        "sessionAffinityFormat" : "openai-nosession"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.002,
+        "cacheWrite" : 0,
+        "input" : 0.1,
+        "output" : 0.2
+      },
+      "id" : "muse-spark-1.3-contributor",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 131072,
+      "name" : "Muse Spark 1.3 Contributor",
+      "provider" : "opencode-go",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : null,
+        "medium" : "medium",
+        "minimal" : "minimal",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "omen-alpha" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/opencode.ai\/zen\/go\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsStore" : false
+      },
+      "contextWindow" : 500000,
+      "cost" : {
+        "cacheRead" : 0.040000000000000001,
+        "cacheWrite" : 0,
+        "input" : 0.2,
+        "output" : 0.66
+      },
+      "id" : "omen-alpha",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "Omen Alpha",
+      "provider" : "opencode-go",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : null,
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
+    },
     "qwen3.6-plus" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/opencode.ai\/zen\/go\/v1",
@@ -17693,16 +18111,16 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.012999999999999999,
+        "cacheRead" : 0.0089999999999999993,
         "cacheWrite" : 0,
-        "input" : 0.050000000000000003,
-        "output" : 0.16
+        "input" : 0.044999999999999998,
+        "output" : 0.089999999999999997
       },
       "id" : "~deepseek\/deepseek-v4-flash-latest",
       "input" : [
         "text"
       ],
-      "maxTokens" : 393216,
+      "maxTokens" : 943718,
       "name" : "DeepSeek V4 Flash Latest",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -17933,7 +18351,7 @@
         "text",
         "image"
       ],
-      "maxTokens" : 131072,
+      "maxTokens" : 943718,
       "name" : "Z.ai: GLM Flash Latest",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -17956,10 +18374,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.1,
+        "cacheRead" : 0.234,
         "cacheWrite" : 0,
-        "input" : 1.15,
-        "output" : 3.5
+        "input" : 1.17,
+        "output" : 3.96
       },
       "id" : "~z-ai\/glm-latest",
       "input" : [
@@ -18177,12 +18595,8 @@
       "reasoning" : false
     },
     "anthropic\/claude-3-haiku" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 200000,
       "cost" : {
         "cacheRead" : 0.029999999999999999,
@@ -18201,11 +18615,10 @@
       "reasoning" : false
     },
     "anthropic\/claude-fable-5" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18267,11 +18680,11 @@
       }
     },
     "anthropic\/claude-fable-5.1" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true,
+        "supportsMidConvoEffort" : true
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18333,12 +18746,8 @@
       }
     },
     "anthropic\/claude-haiku-4.5" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 200000,
       "cost" : {
         "cacheRead" : 0.1,
@@ -18381,12 +18790,8 @@
       "reasoning" : true
     },
     "anthropic\/claude-opus-4" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 200000,
       "cost" : {
         "cacheRead" : 1.5,
@@ -18405,12 +18810,8 @@
       "reasoning" : true
     },
     "anthropic\/claude-opus-4.1" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 200000,
       "cost" : {
         "cacheRead" : 1.5,
@@ -18453,12 +18854,8 @@
       "reasoning" : true
     },
     "anthropic\/claude-opus-4.5" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 200000,
       "cost" : {
         "cacheRead" : 0.5,
@@ -18501,11 +18898,10 @@
       "reasoning" : true
     },
     "anthropic\/claude-opus-4.6" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18567,11 +18963,11 @@
       }
     },
     "anthropic\/claude-opus-4.7" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true,
+        "supportsTemperature" : false
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18633,11 +19029,11 @@
       }
     },
     "anthropic\/claude-opus-4.8" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true,
+        "supportsTemperature" : false
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18699,11 +19095,12 @@
       }
     },
     "anthropic\/claude-opus-5" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true,
+        "supportsMidConvoEffort" : true,
+        "supportsTemperature" : false
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18727,7 +19124,7 @@
         "max" : "max",
         "medium" : "medium",
         "minimal" : null,
-        "off" : "none",
+        "off" : null,
         "xhigh" : "xhigh"
       }
     },
@@ -18765,12 +19162,8 @@
       }
     },
     "anthropic\/claude-sonnet-4" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 200000,
       "cost" : {
         "cacheRead" : 0.3,
@@ -18789,12 +19182,8 @@
       "reasoning" : true
     },
     "anthropic\/claude-sonnet-4.5" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
-      },
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "contextWindow" : 1000000,
       "cost" : {
         "cacheRead" : 0.3,
@@ -18837,11 +19226,10 @@
       "reasoning" : true
     },
     "anthropic\/claude-sonnet-4.6" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -18903,11 +19291,10 @@
       }
     },
     "anthropic\/claude-sonnet-5" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/openrouter.ai\/api",
       "compat" : {
-        "cacheControlFormat" : "anthropic",
-        "thinkingFormat" : "openrouter"
+        "forceAdaptiveThinking" : true
       },
       "contextWindow" : 1000000,
       "cost" : {
@@ -19265,18 +19652,18 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 128000,
+      "contextWindow" : 163840,
       "cost" : {
         "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.2574,
-        "output" : 1.0287
+        "input" : 0.32,
+        "output" : 0.89
       },
       "id" : "deepseek\/deepseek-chat",
       "input" : [
         "text"
       ],
-      "maxTokens" : 16000,
+      "maxTokens" : 16384,
       "name" : "DeepSeek: DeepSeek V3",
       "provider" : "openrouter",
       "reasoning" : false
@@ -19311,18 +19698,18 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 163840,
+      "contextWindow" : 161000,
       "cost" : {
-        "cacheRead" : 0.13,
+        "cacheRead" : 0.55,
         "cacheWrite" : 0,
-        "input" : 0.25,
-        "output" : 0.95
+        "input" : 0.55,
+        "output" : 1.65
       },
       "id" : "deepseek\/deepseek-chat-v3.1",
       "input" : [
         "text"
       ],
-      "maxTokens" : 32768,
+      "maxTokens" : 144900,
       "name" : "DeepSeek: DeepSeek V3.1",
       "provider" : "openrouter",
       "reasoning" : true
@@ -19458,10 +19845,10 @@
       },
       "contextWindow" : 1024000,
       "cost" : {
-        "cacheRead" : 0.016799999999999999,
+        "cacheRead" : 0.016268000000000001,
         "cacheWrite" : 0,
-        "input" : 0.084000000000000005,
-        "output" : 0.168
+        "input" : 0.081339999999999996,
+        "output" : 0.16268
       },
       "id" : "deepseek\/deepseek-v4-flash",
       "input" : [
@@ -19491,16 +19878,16 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.016,
+        "cacheRead" : 0.0099959999999999997,
         "cacheWrite" : 0,
-        "input" : 0.065000000000000002,
-        "output" : 0.18
+        "input" : 0.049979999999999997,
+        "output" : 0.099959999999999993
       },
       "id" : "deepseek\/deepseek-v4-flash-0731",
       "input" : [
         "text"
       ],
-      "maxTokens" : 943718,
+      "maxTokens" : 131072,
       "name" : "DeepSeek: DeepSeek V4 Flash 0731",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -19591,10 +19978,10 @@
       },
       "contextWindow" : 1024000,
       "cost" : {
-        "cacheRead" : 0.085898000000000002,
+        "cacheRead" : 0.059826999999999998,
         "cacheWrite" : 0,
-        "input" : 1.030776,
-        "output" : 2.061552
+        "input" : 0.717924,
+        "output" : 1.435848
       },
       "id" : "deepseek\/deepseek-v4-pro",
       "input" : [
@@ -19624,10 +20011,10 @@
       },
       "contextWindow" : 1024000,
       "cost" : {
-        "cacheRead" : 0.021999999999999999,
+        "cacheRead" : 0.037356,
         "cacheWrite" : 0,
-        "input" : 0.66,
-        "output" : 1.98
+        "input" : 1.12068,
+        "output" : 3.36204
       },
       "id" : "deepseek\/deepseek-v4-pro-0813",
       "input" : [
@@ -19981,7 +20368,7 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 131072,
+      "contextWindow" : 65536,
       "cost" : {
         "cacheRead" : 0.2,
         "cacheWrite" : 0.375,
@@ -20697,29 +21084,6 @@
       "provider" : "openrouter",
       "reasoning" : true
     },
-    "ibm-granite\/granite-4.1-8b" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "supportsDeveloperRole" : false,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 131072,
-      "cost" : {
-        "cacheRead" : 0.050000000000000003,
-        "cacheWrite" : 0,
-        "input" : 0.050000000000000003,
-        "output" : 0.1
-      },
-      "id" : "ibm-granite\/granite-4.1-8b",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 117964,
-      "name" : "IBM: Granite 4.1 8B",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
     "ibm-granite\/granite-4.2-8b" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -20835,7 +21199,30 @@
         "text"
       ],
       "maxTokens" : 32768,
-      "name" : "Ling-3.0-flash",
+      "name" : "inclusionAI: Ling 3.0 Flash",
+      "provider" : "openrouter",
+      "reasoning" : true
+    },
+    "inclusionai\/ling-3.0-flash-fin" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 262144,
+      "cost" : {
+        "cacheRead" : 0.012,
+        "cacheWrite" : 0,
+        "input" : 0.059999999999999998,
+        "output" : 0.18
+      },
+      "id" : "inclusionai\/ling-3.0-flash-fin",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 235929,
+      "name" : "inclusionAI: Ling 3.0 Flash Fin",
       "provider" : "openrouter",
       "reasoning" : true
     },
@@ -20858,7 +21245,30 @@
         "text"
       ],
       "maxTokens" : 32768,
-      "name" : "Ling 3.0 Flash Fin (free)",
+      "name" : "inclusionAI: Ling 3.0 Flash Fin (free)",
+      "provider" : "openrouter",
+      "reasoning" : true
+    },
+    "inclusionai\/ling-3.0-flash-sante:free" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 262144,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0,
+        "output" : 0
+      },
+      "id" : "inclusionai\/ling-3.0-flash-sante:free",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 32768,
+      "name" : "inclusionAI: Ling 3.0 Flash Sante (free)",
       "provider" : "openrouter",
       "reasoning" : true
     },
@@ -21010,18 +21420,18 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 128000,
+      "contextWindow" : 131072,
       "cost" : {
-        "cacheRead" : 0.71,
+        "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.71,
-        "output" : 0.71
+        "input" : 0.1,
+        "output" : 0.32
       },
       "id" : "meta-llama\/llama-3.3-70b-instruct",
       "input" : [
         "text"
       ],
-      "maxTokens" : 115200,
+      "maxTokens" : 16384,
       "name" : "Meta: Llama 3.3 70B Instruct",
       "provider" : "openrouter",
       "reasoning" : false
@@ -21086,14 +21496,14 @@
         "cacheRead" : 0.040000000000000001,
         "cacheWrite" : 0,
         "input" : 0.3,
-        "output" : 1.2
+        "output" : 1.1
       },
       "id" : "meta\/muse-glimmer-30b",
       "input" : [
         "text",
         "image"
       ],
-      "maxTokens" : 16384,
+      "maxTokens" : 117964,
       "name" : "Meta: Muse Glimmer 30B",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -21233,6 +21643,72 @@
         "high" : "high",
         "low" : "low",
         "max" : null,
+        "medium" : "medium",
+        "minimal" : "minimal",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "meta\/muse-spark-1.3" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.15,
+        "cacheWrite" : 0,
+        "input" : 1.25,
+        "output" : 4.25
+      },
+      "id" : "meta\/muse-spark-1.3",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 943718,
+      "name" : "Meta: Muse Spark 1.3",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : "minimal",
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "meta\/muse-spark-1.3-contributor" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.002,
+        "cacheWrite" : 0,
+        "input" : 0.1,
+        "output" : 0.2
+      },
+      "id" : "meta\/muse-spark-1.3-contributor",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 943718,
+      "name" : "Meta: Muse Spark 1.3 Contributor",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
         "medium" : "medium",
         "minimal" : "minimal",
         "off" : null,
@@ -21716,7 +22192,7 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 262144,
+      "contextWindow" : 32768,
       "cost" : {
         "cacheRead" : 0,
         "cacheWrite" : 0,
@@ -21728,7 +22204,7 @@
         "text",
         "image"
       ],
-      "maxTokens" : 209715,
+      "maxTokens" : 26214,
       "name" : "Mistral: Mistral Medium 3.5 (batch)",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -22186,7 +22662,7 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.025000000000000001,
+        "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
         "input" : 0.050000000000000003,
         "output" : 0.2
@@ -22195,7 +22671,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 228000,
+      "maxTokens" : 235929,
       "name" : "NVIDIA: Nemotron 3 Nano 30B A3B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -22308,38 +22784,6 @@
       ],
       "maxTokens" : 32768,
       "name" : "NVIDIA: Nemotron 3 Ultra",
-      "provider" : "openrouter",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "high" : "high",
-        "low" : null,
-        "max" : null,
-        "medium" : "medium",
-        "minimal" : null,
-        "off" : "none",
-        "xhigh" : null
-      }
-    },
-    "nvidia\/nemotron-3-ultra-550b-a55b:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "supportsDeveloperRole" : false,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 512288,
-      "cost" : {
-        "cacheRead" : 0.2,
-        "cacheWrite" : 0,
-        "input" : 0.6,
-        "output" : 3.6
-      },
-      "id" : "nvidia\/nemotron-3-ultra-550b-a55b:batch",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 461059,
-      "name" : "NVIDIA: Nemotron 3 Ultra (batch)",
       "provider" : "openrouter",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -24332,6 +24776,134 @@
         "xhigh" : "xhigh"
       }
     },
+    "openai\/gpt-6-astra" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "id" : "openai\/gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6 Astra",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6-astra-pro" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "id" : "openai\/gpt-6-astra-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6 Astra Pro",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6-astra-pro:batch" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.5,
+        "cacheWrite" : 6.25,
+        "input" : 5,
+        "output" : 25
+      },
+      "id" : "openai\/gpt-6-astra-pro:batch",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6 Astra Pro (batch)",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6-astra:batch" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.5,
+        "cacheWrite" : 6.25,
+        "input" : 5,
+        "output" : 25
+      },
+      "id" : "openai\/gpt-6-astra:batch",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6 Astra (batch)",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
     "openai\/gpt-audio" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -25214,16 +25786,16 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.017500000000000002,
+        "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.087499999999999994,
-        "output" : 0.35
+        "input" : 0.089999999999999997,
+        "output" : 0.55
       },
       "id" : "qwen\/qwen3-235b-a22b-2507",
       "input" : [
         "text"
       ],
-      "maxTokens" : 235929,
+      "maxTokens" : 16384,
       "name" : "Qwen: Qwen3 235B A22B Instruct 2507",
       "provider" : "openrouter",
       "reasoning" : false
@@ -25720,11 +26292,11 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 262144,
+      "contextWindow" : 256000,
       "cost" : {
-        "cacheRead" : 0.25,
+        "cacheRead" : 0.15625,
         "cacheWrite" : 0,
-        "input" : 0.25,
+        "input" : 0.3125,
         "output" : 1.25
       },
       "id" : "qwen\/qwen3.5-35b-a3b",
@@ -25732,7 +26304,7 @@
         "text",
         "image"
       ],
-      "maxTokens" : 235929,
+      "maxTokens" : 16384,
       "name" : "Qwen: Qwen3.5-35B-A3B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -25770,17 +26342,17 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0,
+        "cacheRead" : 0.225,
         "cacheWrite" : 0,
-        "input" : 0.39,
-        "output" : 2.34
+        "input" : 0.55,
+        "output" : 3.5
       },
       "id" : "qwen\/qwen3.5-397b-a17b",
       "input" : [
         "text",
         "image"
       ],
-      "maxTokens" : 65536,
+      "maxTokens" : 235929,
       "name" : "Qwen: Qwen3.5 397B A17B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -25866,17 +26438,17 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.12,
+        "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.6,
-        "output" : 3.6
+        "input" : 0.3,
+        "output" : 2
       },
       "id" : "qwen\/qwen3.6-27b",
       "input" : [
         "text",
         "image"
       ],
-      "maxTokens" : 235929,
+      "maxTokens" : 65536,
       "name" : "Qwen: Qwen3.6 27B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -26054,9 +26626,9 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 262144,
+      "contextWindow" : 1000000,
       "cost" : {
-        "cacheRead" : 0.2,
+        "cacheRead" : 0.25,
         "cacheWrite" : 0,
         "input" : 2,
         "output" : 6
@@ -26065,7 +26637,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 131072,
+      "maxTokens" : 262144,
       "name" : "Qwen: Qwen3.8 2.4T A95B",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -26121,9 +26693,9 @@
       "contextWindow" : 1000000,
       "cost" : {
         "cacheRead" : 0.085000000000000006,
-        "cacheWrite" : 0.53125,
-        "input" : 0.425,
-        "output" : 2.55
+        "cacheWrite" : 0,
+        "input" : 0.42,
+        "output" : 3
       },
       "id" : "qwen\/qwen3.8-27b",
       "input" : [
@@ -26168,7 +26740,7 @@
       "provider" : "openrouter",
       "reasoning" : true
     },
-    "qwen\/qwen3.8-max" : {
+    "qwen\/qwen3.8-max-0902" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
       "compat" : {
@@ -26182,13 +26754,13 @@
         "input" : 2,
         "output" : 6
       },
-      "id" : "qwen\/qwen3.8-max",
+      "id" : "qwen\/qwen3.8-max-0902",
       "input" : [
         "text",
         "image"
       ],
       "maxTokens" : 131072,
-      "name" : "Qwen: Qwen3.8 Max",
+      "name" : "Qwen: Qwen3.8 Max (0902)",
       "provider" : "openrouter",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -26499,7 +27071,7 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 32768,
+      "contextWindow" : 1024000,
       "cost" : {
         "cacheRead" : 0,
         "cacheWrite" : 0,
@@ -26510,7 +27082,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 26214,
+      "maxTokens" : 819200,
       "name" : "TheDrummer: UnslopNemo 12B",
       "provider" : "openrouter",
       "reasoning" : false
@@ -26792,6 +27364,39 @@
         "xhigh" : null
       }
     },
+    "x-ai\/grok-4.3:batch" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.16,
+        "cacheWrite" : 0,
+        "input" : 1,
+        "output" : 2
+      },
+      "id" : "x-ai\/grok-4.3:batch",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 900000,
+      "name" : "SpaceXAI: Grok 4.3 (batch)",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : null,
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : null
+      }
+    },
     "x-ai\/grok-4.5" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -27033,18 +27638,18 @@
         "supportsDeveloperRole" : false,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 198000,
+      "contextWindow" : 204800,
       "cost" : {
-        "cacheRead" : 0.080000000000000002,
+        "cacheRead" : 0.11,
         "cacheWrite" : 0,
-        "input" : 0.43,
-        "output" : 1.75
+        "input" : 0.55,
+        "output" : 2.2
       },
       "id" : "z-ai\/glm-4.6",
       "input" : [
         "text"
       ],
-      "maxTokens" : 16384,
+      "maxTokens" : 131072,
       "name" : "Z.ai: GLM 4.6",
       "provider" : "openrouter",
       "reasoning" : true
@@ -27261,7 +27866,7 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.26,
+        "cacheRead" : 0.14,
         "cacheWrite" : 0,
         "input" : 1.4,
         "output" : 4.4
@@ -27270,7 +27875,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 131072,
+      "maxTokens" : 262144,
       "name" : "Z.ai: GLM 5.3",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -27431,6 +28036,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -27464,6 +28070,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -27497,6 +28104,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -27530,6 +28138,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -27629,6 +28238,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -27864,12 +28474,13 @@
       "provider" : "qwen-token-plan",
       "reasoning" : true,
       "thinkingLevelMap" : {
-        "high" : "high",
-        "low" : null,
-        "max" : "max",
-        "medium" : null,
+        "high" : null,
+        "low" : "low",
+        "max" : null,
+        "medium" : "medium",
         "minimal" : null,
-        "xhigh" : null
+        "off" : null,
+        "xhigh" : "xhigh"
       }
     },
     "qwen3.8-max" : {
@@ -27903,6 +28514,7 @@
         "max" : null,
         "medium" : "medium",
         "minimal" : null,
+        "off" : null,
         "xhigh" : "xhigh"
       }
     }
@@ -27963,6 +28575,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -27996,6 +28609,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28029,6 +28643,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28062,6 +28677,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28161,6 +28777,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28396,12 +29013,13 @@
       "provider" : "qwen-token-plan-cn",
       "reasoning" : true,
       "thinkingLevelMap" : {
-        "high" : "high",
-        "low" : null,
-        "max" : "max",
-        "medium" : null,
+        "high" : null,
+        "low" : "low",
+        "max" : null,
+        "medium" : "medium",
         "minimal" : null,
-        "xhigh" : null
+        "off" : null,
+        "xhigh" : "xhigh"
       }
     },
     "qwen3.8-max" : {
@@ -28435,6 +29053,7 @@
         "max" : null,
         "medium" : "medium",
         "minimal" : null,
+        "off" : null,
         "xhigh" : "xhigh"
       }
     }
@@ -28470,6 +29089,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28503,6 +29123,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28536,6 +29157,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28569,6 +29191,7 @@
         "max" : "max",
         "medium" : null,
         "minimal" : null,
+        "off" : null,
         "xhigh" : null
       }
     },
@@ -28649,6 +29272,41 @@
       "provider" : "qwen-token-plan-individual",
       "reasoning" : true
     },
+    "qwen3.8-flash" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/token-plan.ap-southeast-1.maas.aliyuncs.com\/compatible-mode\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "supportsReasoningEffort" : true,
+        "supportsStore" : false,
+        "thinkingFormat" : "qwen"
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0,
+        "output" : 0
+      },
+      "id" : "qwen3.8-flash",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 131072,
+      "name" : "Qwen3.8 Flash",
+      "provider" : "qwen-token-plan-individual",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : null,
+        "low" : "low",
+        "max" : null,
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
     "qwen3.8-max" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/token-plan.ap-southeast-1.maas.aliyuncs.com\/compatible-mode\/v1",
@@ -28680,6 +29338,7 @@
         "max" : null,
         "medium" : "medium",
         "minimal" : null,
+        "off" : null,
         "xhigh" : "xhigh"
       }
     }
@@ -31085,6 +31744,44 @@
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
     },
+    "inclusionai\/ling-3.0-flash-sante" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 256000,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0,
+        "output" : 0
+      },
+      "id" : "inclusionai\/ling-3.0-flash-sante",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 32000,
+      "name" : "Ling 3.0 Flash Sante",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "inclusionai\/ling-3.0-flash-sante-free" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 256000,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0,
+        "output" : 0
+      },
+      "id" : "inclusionai\/ling-3.0-flash-sante-free",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 32000,
+      "name" : "Ling 3.0 Flash Sante (Free)",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
     "interfaze\/interfaze-beta" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
@@ -31357,6 +32054,46 @@
       ],
       "maxTokens" : 1048576,
       "name" : "Muse Spark 1.2 Contributor",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "meta\/muse-spark-1.3" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.15,
+        "cacheWrite" : 0,
+        "input" : 1.25,
+        "output" : 4.25
+      },
+      "id" : "meta\/muse-spark-1.3",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 1048576,
+      "name" : "Muse Spark 1.3",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "meta\/muse-spark-1.3-contributor" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.002,
+        "cacheWrite" : 0,
+        "input" : 0.1,
+        "output" : 0.2
+      },
+      "id" : "meta\/muse-spark-1.3-contributor",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 1048576,
+      "name" : "Muse Spark 1.3 Contributor",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
     },
@@ -32919,7 +33656,7 @@
       "contextWindow" : 1050000,
       "cost" : {
         "cacheRead" : 0.040000000000000001,
-        "cacheWrite" : 0.25,
+        "cacheWrite" : 0.5,
         "input" : 0.4,
         "output" : 2.4
       },
@@ -32965,7 +33702,7 @@
       "contextWindow" : 1050000,
       "cost" : {
         "cacheRead" : 0.4,
-        "cacheWrite" : 2.5,
+        "cacheWrite" : 5,
         "input" : 4,
         "output" : 20
       },
@@ -33011,7 +33748,7 @@
       "contextWindow" : 1050000,
       "cost" : {
         "cacheRead" : 0.4,
-        "cacheWrite" : 2.5,
+        "cacheWrite" : 5,
         "input" : 4,
         "output" : 24
       },
@@ -33022,6 +33759,52 @@
       ],
       "maxTokens" : 128000,
       "name" : "GPT 5.6 Terra (Fast)",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6-astra" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 1,
+        "cacheWrite" : 12.5,
+        "input" : 10,
+        "output" : 50
+      },
+      "id" : "openai\/gpt-6-astra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6-astra-fast" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 2,
+        "cacheWrite" : 25,
+        "input" : 20,
+        "output" : 100
+      },
+      "id" : "openai\/gpt-6-astra-fast",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "maxTokens" : 128000,
+      "name" : "GPT-6 Astra (Fast)",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -33971,10 +34754,10 @@
       "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
       "contextWindow" : 1000000,
       "cost" : {
-        "cacheRead" : 0.14,
+        "cacheRead" : 0.13,
         "cacheWrite" : 0,
-        "input" : 1.4,
-        "output" : 4.4
+        "input" : 0.7,
+        "output" : 2.2
       },
       "id" : "zai\/glm-5.3",
       "input" : [
@@ -33982,6 +34765,25 @@
       ],
       "maxTokens" : 1000000,
       "name" : "GLM 5.3",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "zai\/glm-5.3-fast" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.21,
+        "cacheWrite" : 0,
+        "input" : 2.1,
+        "output" : 6.6
+      },
+      "id" : "zai\/glm-5.3-fast",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 262144,
+      "name" : "GLM 5.3 Fast",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
     },
@@ -34002,6 +34804,25 @@
       ],
       "maxTokens" : 131000,
       "name" : "GLM 5.3 Flash",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "zai\/glm-5.3-promo-50" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.13,
+        "cacheWrite" : 0,
+        "input" : 0.7,
+        "output" : 2.2
+      },
+      "id" : "zai\/glm-5.3-promo-50",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 1048576,
+      "name" : "GLM 5.3 (50% off)",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
     },
@@ -34121,33 +34942,6 @@
         "minimal" : null,
         "off" : null,
         "xhigh" : "xhigh"
-      }
-    },
-    "grok-build-0.1" : {
-      "api" : "openai-responses",
-      "baseUrl" : "https:\/\/api.x.ai\/v1",
-      "compat" : {
-        "supportsLongCacheRetention" : false
-      },
-      "contextWindow" : 256000,
-      "cost" : {
-        "cacheRead" : 0.2,
-        "cacheWrite" : 0,
-        "input" : 1,
-        "output" : 2
-      },
-      "id" : "grok-build-0.1",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "maxTokens" : 256000,
-      "name" : "Grok Build 0.1",
-      "provider" : "xai",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "minimal" : null,
-        "off" : null
       }
     }
   },
