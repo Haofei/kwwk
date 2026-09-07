@@ -394,6 +394,13 @@ try await agent.prompt("Is it warmer in Tokyo or Oslo right now?")
 
 ### Hooks — audit, redact, short-circuit
 
+`beforeRunEnd` is an optional host completion policy on `AgentOptions` / `Agent`.
+After a natural stop and drained queues, it can return runtime messages to keep
+the same run going, or `[]` to finish. It receives the current `AgentContext`
+and cancellation handle. Cancellation, provider failures and hard turn limits
+remain terminal. No hook is installed by default; background task behavior is
+unchanged. Hosts that wait in the hook must bound that wait and honor cancellation.
+
 Every `AgentOptions` accepts hooks that fire at well-defined points. Use
 them to enforce policy without forking the loop:
 

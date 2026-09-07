@@ -45,6 +45,7 @@ public struct AgentLoopConfig: Sendable {
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
     public var betweenTurns: BetweenTurnsHook?
+    public var beforeRunEnd: BeforeRunEndHook?
     public var contextCompaction: ContextCompactionHook?
 
     public init(
@@ -71,6 +72,7 @@ public struct AgentLoopConfig: Sendable {
         convertToLlm: ConvertToLlmHook? = nil,
         transformContext: TransformContextHook? = nil,
         betweenTurns: BetweenTurnsHook? = nil,
+        beforeRunEnd: BeforeRunEndHook? = nil,
         contextCompaction: ContextCompactionHook? = nil
     ) {
         self.model = model
@@ -96,6 +98,7 @@ public struct AgentLoopConfig: Sendable {
         self.convertToLlm = convertToLlm
         self.transformContext = transformContext
         self.betweenTurns = betweenTurns
+        self.beforeRunEnd = beforeRunEnd
         self.contextCompaction = contextCompaction
     }
 }
@@ -658,6 +661,19 @@ public enum AgentLoop {
             if !followUps.isEmpty {
                 pendingMessages = followUps
                 continue outer
+            }
+            if let limit = config.maxTurns, turnsExecuted >= limit { break }
+            if let hook = config.beforeRunEnd, cancellation?.isCancelled != true {
+                var messages = await hook(currentContext, cancellation)
+                try cancellation?.throwIfCancelled()
+                try Task.checkCancellation()
+                messages += await config.getRuntimeMessages()
+                messages += await config.getSteeringMessages()
+                messages += await config.getFollowUpMessages()
+                if !messages.isEmpty, cancellation?.isCancelled != true {
+                    pendingMessages = messages
+                    continue outer
+                }
             }
             break
         }

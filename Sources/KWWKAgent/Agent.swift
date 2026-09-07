@@ -104,6 +104,7 @@ public struct AgentOptions: Sendable {
     public var convertToLlm: ConvertToLlmHook?
     public var transformContext: TransformContextHook?
     public var betweenTurns: BetweenTurnsHook?
+    public var beforeRunEnd: BeforeRunEndHook?
     /// Automatic context compaction. Enabled by default at 75% of the model's
     /// context window; pass `nil` to opt out of proactive compaction and
     /// provider-overflow recovery.
@@ -134,6 +135,7 @@ public struct AgentOptions: Sendable {
         convertToLlm: ConvertToLlmHook? = nil,
         transformContext: TransformContextHook? = nil,
         betweenTurns: BetweenTurnsHook? = nil,
+        beforeRunEnd: BeforeRunEndHook? = nil,
         autoCompact: AgentAutoCompactOptions? = AgentAutoCompactOptions(),
         compactionModel: Model? = nil,
         authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)? = nil
@@ -156,6 +158,7 @@ public struct AgentOptions: Sendable {
         self.convertToLlm = convertToLlm
         self.transformContext = transformContext
         self.betweenTurns = betweenTurns
+        self.beforeRunEnd = beforeRunEnd
         self.autoCompact = autoCompact
         self.compactionModel = compactionModel
         self.authResolver = authResolver
@@ -213,6 +216,7 @@ public final class Agent: @unchecked Sendable {
     private var _convertToLlm: ConvertToLlmHook?
     private var _transformContext: TransformContextHook?
     private var _betweenTurns: BetweenTurnsHook?
+    private var _beforeRunEnd: BeforeRunEndHook?
     private var _autoCompact: AgentAutoCompactOptions?
     private var _compactionModel: Model?
     private var _authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)?
@@ -265,6 +269,10 @@ public final class Agent: @unchecked Sendable {
     public var betweenTurns: BetweenTurnsHook? {
         get { lock.withLock { _betweenTurns } }
         set { lock.withLock { _betweenTurns = newValue } }
+    }
+    public var beforeRunEnd: BeforeRunEndHook? {
+        get { lock.withLock { _beforeRunEnd } }
+        set { lock.withLock { _beforeRunEnd = newValue } }
     }
     public var autoCompact: AgentAutoCompactOptions? {
         get { lock.withLock { _autoCompact } }
@@ -347,6 +355,7 @@ public final class Agent: @unchecked Sendable {
         self._convertToLlm = options.convertToLlm
         self._transformContext = options.transformContext
         self._betweenTurns = options.betweenTurns
+        self._beforeRunEnd = options.beforeRunEnd
         self._autoCompact = options.autoCompact
         self._compactionModel = options.compactionModel
         self._authResolver = options.authResolver
@@ -737,6 +746,7 @@ extension Agent {
             convertToLlm: convertToLlm,
             transformContext: transformContext,
             betweenTurns: builtInBetweenTurnsHook(),
+            beforeRunEnd: beforeRunEnd,
             contextCompaction: builtInContextCompactionHook()
         )
         config.finalTextOnlyOnLastTurn = finalTextOnlyOnLastTurn
