@@ -555,6 +555,12 @@ public typealias TransformContextHook = @Sendable ([Message], CancellationHandle
 /// returns the loop resumes with the new context.
 public typealias BetweenTurnsHook = @Sendable (AgentContext, CancellationHandle?) async -> AgentContext?
 
+/// Optional host policy at natural run completion, after queued messages drain.
+/// Return runtime messages to continue the same run, or an empty array to finish.
+/// Errors, cancellation and hard turn limits bypass this hook. Hosts must honor
+/// cancellation and bound any waiting they perform here. Default: no policy.
+public typealias BeforeRunEndHook = @Sendable (AgentContext, CancellationHandle?) async -> [Message]
+
 public enum AgentContextCompactionTrigger: Sendable, Hashable {
     case preflight(pendingMessages: [Message])
     case proactive
