@@ -278,7 +278,7 @@ public enum Skills {
     /// recursively for `SKILL.md` files; root-level `.md` files are also loaded
     /// as skills. Missing directories are skipped silently. Duplicate skill
     /// names keep the first occurrence (earlier directories win).
-    public static func load(directories: [String]) -> (skills: [Skill], diagnostics: [SkillDiagnostic]) {
+    public static func load(directories: [String], useIndex: Bool = true) -> (skills: [Skill], diagnostics: [SkillDiagnostic]) {
         var skills: [Skill] = []
         var diagnostics: [SkillDiagnostic] = []
         var seenNames: Set<String> = []
@@ -289,6 +289,15 @@ public enum Skills {
             guard fm.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else { continue }
             // Fresh matcher per root dir; rootDir == dir so prefixes are
             // relative to each root (pi parity).
+            let indexed = useIndex ? SkillsIndex.read(directory: dir) : nil
+            if let indexed, let entries = indexed.skills {
+                for skill in entries where seenNames.insert(skill.name).inserted {
+                    skills.append(skill)
+                }
+                diagnostics.append(contentsOf: indexed.diagnostics)
+                continue
+            }
+            if let indexed { diagnostics.append(contentsOf: indexed.diagnostics) }
             let result = loadFromDirectory(
                 dir,
                 includeRootFiles: true,
